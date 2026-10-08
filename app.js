@@ -1,6 +1,13 @@
 'use strict';
 /* ===== NMT Vocabulary — вся логика. Данные: data/vocab_nmt2026.json (не изменяются). ===== */
 const $=(s,r=document)=>r.querySelector(s);
+/* высота приложения: в iOS-PWA fixed-слои иногда не доходят до низа экрана */
+function fitH(){
+ const sa=navigator.standalone||matchMedia('(display-mode:standalone)').matches;
+ let h=innerHeight;
+ if(sa&&innerHeight>innerWidth)h=Math.max(innerHeight,Math.max(screen.width,screen.height));
+ document.documentElement.style.setProperty('--H',h+'px')}
+fitH();addEventListener('resize',fitH);addEventListener('orientationchange',()=>setTimeout(fitH,300));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const INT=[0,1,3,7,14,30,60];                       // интервалы (дни) по ступеням; ступень 7 = выучено
 const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4)/864e5);
