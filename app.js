@@ -1,5 +1,5 @@
 'use strict';
-/* ===== NMT Vocabulary — вся логика. Данные: data/vocab_nmt2026.json (не изменяются). ===== */
+/* ===== NMT Vocabulary — вся логика. Дані: data/vocab_nmt2026.json (не изменяются). ===== */
 const $=(s,r=document)=>r.querySelector(s);
 /* высота приложения: в iOS-PWA fixed-слои иногда не доходят до низа экрана */
 function fitH(){
@@ -9,7 +9,7 @@ function fitH(){
  document.documentElement.style.setProperty('--H',h+'px')}
 fitH();addEventListener('resize',fitH);addEventListener('orientationchange',()=>setTimeout(fitH,300));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const INT=[0,1,3,7,14,30,60];                       // интервалы (дни) по ступеням; ступень 7 = выучено
+const INT=[0,1,3,7,14,30,60];                       // интервалы (дни) по ступеням; ступень 7 = вивчено
 const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*6e4)/864e5);
 const dstr=d=>new Date(d*864e5).toISOString().slice(0,10);
 const shuf=a=>{a=a.slice();for(let i=a.length;i>1;){const j=Math.random()*i--|0;[a[i],a[j]]=[a[j],a[i]]}return a};
@@ -36,7 +36,7 @@ const arrow=it=>it.type==='word_formation'&&it.en.includes('→');
 const fam=it=>it.type==='word'||it.type==='phrase'?'wp':it.type;
 const isNewDone=id=>P(id)?.first===today();
 const pick=a=>a[Math.random()*a.length|0];
-const stLabel=s=>s>=7?'Выучено':s>=4?'Закрепляется':s>=1?'Изучается':'Новое';
+const stLabel=s=>s>=7?'Вивчено':s>=4?'Закріплюється':s>=1?'Вивчається':'Нове';
 const meta=it=>[(it.topics||[]).join(' · '),it.level].filter(Boolean).join(' · ');
 const speakText=it=>strip(it.en.replace('→',', ')).replace(/\(.*?\)/g,'');
 function say(it){try{const u=new SpeechSynthesisUtterance(typeof it==='string'?it:speakText(it));u.lang='en-US';u.rate=.9;const v=speechSynthesis.getVoices().find(v=>/^en[-_]US/.test(v.lang));if(v)u.voice=v;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
@@ -98,14 +98,14 @@ function buildEx(e){
  let bag=[];for(const k in W)for(let i=0;i<W[k];i++)bag.push(k);let kind=pick(bag);
  const mc=(label,prompt,ans,ds,sub)=>{if(ds.length<2)return{kind:'card',it};const opts=shuf([ans,...ds]);return{kind:'mc',it,label,prompt,sub,opts,ci:opts.indexOf(ans)}};
  switch(kind){
-  case'wf':return{kind:'type',it,label:'Образуй слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[it.rule,it.uk].filter(Boolean).join(' · '),ans:variants(it)};
-  case'type':return{kind:'type',it,label:'Напиши по-английски',prompt:it.uk,ans:variants(it)};
-  case'mc2':return mc('Выбери английский вариант',it.uk,strip(it.en),distract(it,'en'));
-  case'cloze':return mc('Заполни пропуск',cz.stem,cz.b,cz.d,it.uk);
-  case'anto':return mc('Выбери антоним',strip(it.en),strip(it.antonym),distract(it,'antonym'),it.uk);
-  case'formal':return mc('Выбери неформальный вариант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+it.uk);
+  case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[it.rule,it.uk].filter(Boolean).join(' · '),ans:variants(it)};
+  case'type':return{kind:'type',it,label:'Напиши англійською',prompt:it.uk,ans:variants(it)};
+  case'mc2':return mc('Обери англійський варіант',it.uk,strip(it.en),distract(it,'en'));
+  case'cloze':return mc('Заповни пропуск',cz.stem,cz.b,cz.d,it.uk);
+  case'anto':return mc('Обери антонім',strip(it.en),strip(it.antonym),distract(it,'antonym'),it.uk);
+  case'formal':return mc('Обери неформальний варіант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+it.uk);
   case'card':return{kind:'card',it};
-  default:return mc('Выбери перевод',strip(it.en),it.uk,distract(it,'uk'))}}
+  default:return mc('Обери переклад',strip(it.en),it.uk,distract(it,'uk'))}}
 
 /* ---------- сессия ---------- */
 function startSession(mode,o={}){
@@ -120,12 +120,12 @@ function startSession(mode,o={}){
   if(mode==='hard')ids=mistakes().slice(0,20).map(p=>p.id);
   else if(mode==='fav')ids=shuf([...S.prog.values()].filter(p=>p.fav).map(p=>p.id)).slice(0,20);
   else{const pool=S.items.filter(i=>(!o.cat||i.category===o.cat)&&(!o.topic||(i.topics||[]).includes(o.topic))&&(!o.lvl||i.level===o.lvl)),seen=pool.filter(i=>P(i.id)?.first);ids=shuf(seen.length>=8?seen:pool).slice(0,20).map(i=>i.id)}
-  q=ids.map(id=>({id,k:'prac'}));if(!q.length)return toast('Пока нечего тренировать')}
+  q=ids.map(id=>({id,k:'prac'}));if(!q.length)return toast('Поки нічого тренувати')}
  const cand=q.filter(e=>(e.k==='rev'||e.k==='prac')).map(e=>e.id).filter(id=>{const it=S.byId.get(id);return!arrow(it)&&it.en.length<=28&&it.uk.length<=42});
  for(let i=7;i<q.length&&cand.length>=4;i+=8)q.splice(i,0,{k:'match',ids:shuf(cand).slice(0,4)});
  S.Q={active:true,mode,practice,queue:q,total:q.filter(e=>e.k!=='match').length,done:0,ok:0,bad:0,nw:0,rv:0,streakUp:false};
  render();shell();nextQ()}
-function shell(){$('#app').innerHTML=`<div class="view in"><div class="sh"><button class="x" data-a="quit" aria-label="Закрыть">✕</button><div class="bar pb"><i></i></div><small id="pc"></small></div><div id="qb"></div></div>`;$('#app').scrollTop=0}
+function shell(){$('#app').innerHTML=`<div class="view in"><div class="sh"><button class="x" data-a="quit" aria-label="Закрити">✕</button><div class="bar pb"><i></i></div><small id="pc"></small></div><div id="qb"></div></div>`;$('#app').scrollTop=0}
 function updPb(){const Q=S.Q;$('.pb i').style.width=Math.min(100,Q.done/Math.max(1,Q.total)*100)+'%';$('#pc').textContent=Math.min(Q.done,Q.total)+' / '+Q.total}
 function nextQ(){const Q=S.Q;clearTimeout(Q.tm);if(!Q||!Q.active)return;if(!Q.queue.length)return finish();
  Q.cur=Q.queue.shift();Q.qs=Date.now();Q.locked=false;Q.ex=null;const e=Q.cur;let h;
@@ -135,88 +135,88 @@ function nextQ(){const Q=S.Q;clearTimeout(Q.tm);if(!Q||!Q.active)return;if(!Q.qu
  if(Q.ex&&Q.ex.kind==='type')setTimeout(()=>$('#ti')&&$('#ti').focus(),380)}
 const star=id=>P(id)?.fav?'⭐':'☆';
 function extras(it){const r=[],add=(k,v)=>{if(v&&(!Array.isArray(v)||v.length))r.push(`<div><span>${k}</span>${esc(Array.isArray(v)?v.join(', '):v)}</div>`)};
- add('Синонимы',it.synonyms);add('Антоним',it.antonym&&it.antonym+(it.antonym_uk?' — '+it.antonym_uk:''));add('Informal',it.informal);add('Базовый глагол',it.base_verb);
- add('Правило',it.rule);add('Группа',it.group);add('Заметка',it.note);if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синоним для',it.synonym_of);
+ add('Синоніми',it.synonyms);add('Антонім',it.antonym&&it.antonym+(it.antonym_uk?' — '+it.antonym_uk:''));add('Informal',it.informal);add('Базове дієслово',it.base_verb);
+ add('Правило',it.rule);add('Група',it.group);add('Нотатка',it.note);if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синонім для',it.synonym_of);
  return r.length?`<div class="ext">${r.join('')}</div>`:''}
-function studyV(it){return`<div class="lab">Новое</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Произнести">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Избранное">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Понятно</button>`}
+function studyV(it){return`<div class="lab">Нове</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
 function exV(x){const it=x.it;
- if(x.kind==='card')return`<div class="lab">Карточка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показать перевод</button><p class="hint" style="text-align:center;margin-top:12px">или свайп: ← не знаю · знаю →</p></div>`;
- if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи ответ" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Проверить</button></div><div id="fb"></div>`;
+ if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
+ if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div><div id="fb"></div>`;
  return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div><div id="fb"></div>`}
 function matchV(e){const its=e.ids.map(id=>S.byId.get(id));e.bad=new Set();e.left=null;e.n=0;
- return`<div class="lab">Соедини пары</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(i.uk)}</span></button>`).join('')}</div></div><div id="fb"></div>`}
+ return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(i.uk)}</span></button>`).join('')}</div></div><div id="fb"></div>`}
 function resolve(ok,g){const Q=S.Q;if(Q.locked)return;Q.locked=true;const e=Q.cur,it=S.byId.get(e.id);
  logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(e,g);hap();if(S.st.sound)say(it);updPb();
- $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Верно':'Запомни'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Дальше</button></div>`;
+ $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
  const c=$('.qcard');if(c){c.classList.add(ok?'pop':'shake')}if(ok&&!it.example)Q.tm=setTimeout(nextQ,950);
  $('#fb').scrollIntoView({block:'nearest',behavior:'smooth'})}
 function checkType(giveUp){const Q=S.Q;if(Q.locked)return;const inp=$('#ti'),ok=!giveUp&&Q.ex.ans.includes(norm(inp.value));if(!giveUp&&!inp.value.trim())return;inp.classList.add(ok?'ok':'no');inp.blur();resolve(ok,ok?2:0)}
 function finish(){const Q=S.Q,t=today(),L=S.logs.get(t)||{};Q.queue=[];Q.cur=null;checkStreak();const acc=Q.ok+Q.bad?Math.round(Q.ok/(Q.ok+Q.bad)*100):0,sn=streakNow();
- $('#app').innerHTML=`<div class="view in sum"><h1>${acc>=70?'Отлично! 🎉':'Готово 👏'}</h1><p class="hint">${Q.practice?'Тренировка завершена':S.plan.ids.every(isNewDone)?'Цель дня выполнена':'Сессия завершена'}</p><div class="grid"><div class="glass tile"><b>${Q.nw}</b><span>Новых</span></div><div class="glass tile"><b>${Q.rv}</b><span>Повторил</span></div><div class="glass tile"><b>${acc}%</b><span>Точность</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>${pl(sn,['день','дня','дней'])} подряд</span></div></div><div class="stack"><button class="btn pri big" data-a="quit">Продолжить завтра</button><button class="btn" data-a="more">Повторить ещё</button></div></div>`;
+ $('#app').innerHTML=`<div class="view in sum"><h1>${acc>=70?'Чудово! 🎉':'Готово 👏'}</h1><p class="hint">${Q.practice?'Тренування завершено':S.plan.ids.every(isNewDone)?'Мету дня виконано':'Сесію завершено'}</p><div class="grid"><div class="glass tile"><b>${Q.nw}</b><span>Нових</span></div><div class="glass tile"><b>${Q.rv}</b><span>Повторив</span></div><div class="glass tile"><b>${acc}%</b><span>Точність</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>${pl(sn,['день','дні','днів'])} поспіль</span></div></div><div class="stack"><button class="btn pri big" data-a="quit">Продовжити навчання завтра</button><button class="btn" data-a="more">Повторити ще</button></div></div>`;
  if(acc>=70||Q.streakUp)confetti();hap()}
 
 /* ---------- экраны ---------- */
-const T=[['home','🏠','Главная'],['learn','📚','Учить'],['stats','📊','Статистика'],['words','🔎','Слова'],['set','⚙️','Настройки']];
+const T=[['home','🏠','Головна'],['learn','📚','Вчити'],['stats','📊','Статистика'],['words','🔎','Слова'],['set','⚙️','Налаштування']];
 function render(){const Q=S.Q;document.body.classList.toggle('sess',!!(Q&&Q.active));if(Q&&Q.active)return;
  if(!S.st.onboarded){document.body.classList.add('sess');return onb()}
  $('#tabs').innerHTML=T.map(([k,i,l])=>`<button data-a="tab" data-k="${k}" class="${S.tab===k?'on':''}"><span>${i}</span>${l}</button>`).join('');
  const f={home,learn,stats,words,set:settings}[S.tab];$('#app').innerHTML=`<div class="view in">${f()}</div>`;if(S.tab==='words')bindWords()}
-function onb(){const s=S.st;$('#app').innerHTML=`<div class="view in onb"><h1>Welcome to NMT Vocabulary</h1><p>8 новых слов каждый день — без зубрёжки.</p><div class="lab">Уровень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Оба']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div><div class="lab">Слов в день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div><div style="height:22px"></div><button class="btn pri big" data-a="onbgo">Начать обучение</button></div>`}
+function onb(){const s=S.st;$('#app').innerHTML=`<div class="view in onb"><h1>Welcome to NMT Vocabulary</h1><p>8 нових слів щодня — без зубріння.</p><div class="lab">Рівень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Обидва']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div><div class="lab">Слів на день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div><div style="height:22px"></div><button class="btn pri big" data-a="onbgo">Почати навчання</button></div>`}
 const counts=()=>{let learned=0,intro=0,ok=0,bad=0;S.prog.forEach(p=>{if(p.first)intro++;if(p.stage>=7)learned++});S.logs.forEach(l=>{ok+=l.ok;bad+=l.bad});return{learned,intro,ok,bad,acc:ok+bad?Math.round(ok/(ok+bad)*100):0}};
 function home(){const t=today(),ids=ensurePlan(),done=ids.filter(isNewDone).length,left=ids.length-done,due=dueList().length,sn=streakNow(),L=S.logs.get(t)||{ok:0,bad:0,nw:0,rv:0},c=counts();
- const h=new Date().getHours(),g=h<5?'Доброй ночи':h<12?'Доброе утро':h<18?'Добрый день':'Добрый вечер',frac=ids.length?done/ids.length:1,R=57,C=2*Math.PI*R,all=left===0&&due===0;
+ const h=new Date().getHours(),g=h<5?'Доброї ночі':h<12?'Доброго ранку':h<18?'Добрий день':'Добрий вечір',frac=ids.length?done/ids.length:1,R=57,C=2*Math.PI*R,all=left===0&&due===0;
  return`<div class="top"><div><div class="app-n">NMT Vocabulary</div><h1>${g} 👋</h1></div><span class="pill hot"><span class="fl">🔥</span><b>${sn}</b></span></div>
- <div class="glass hero"><div class="ring"><svg width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="rg"><stop offset="0" stop-color="#6ee7d8"/><stop offset="1" stop-color="#8f86ff"/></linearGradient></defs><circle class="t" cx="64" cy="64" r="${R}"/><circle class="p" cx="64" cy="64" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-to="${C*(1-frac)}"/></svg><div>${done}<small>из ${ids.length}</small></div></div>
- <div class="hs"><div class="big">${left}</div><div>${pl(left,['новое','новых','новых'])} сегодня</div><div class="big" style="font-size:28px">${due}</div><div style="margin:3px 0 0">на повторение</div></div></div>
- ${all?`<div class="glass done"><h2>Ты всё сделал на сегодня 🎉</h2><p>Можно повторить сложное или потренироваться свободно.</p></div><div class="two stack"><button class="btn" data-a="start" data-m="hard">Сложные</button><button class="btn" data-a="start" data-m="free">Свободная</button></div>`
- :`<div class="stack"><button class="btn pri big" data-a="start" data-m="day">${done>0||L.ok+L.bad>0?'Продолжить обучение':'Начать обучение'}</button>${left===0?'':due?`<button class="btn" data-a="start" data-m="review">Только повторение · ${due}</button>`:''}</div>`}
- <div class="grid"><div class="glass tile"><b>${L.nw}</b><span>Новые сегодня</span></div><div class="glass tile"><b>${due}</b><span>На повторение</span></div><div class="glass tile"><b>${c.learned}</b><span>Выучено всего</span></div><div class="glass tile"><b>${c.acc}%</b><span>Точность</span></div></div>
- <div class="glass tile" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Серия: <b style="display:inline">${sn} ${pl(sn,['день','дня','дней'])}</b></span><span>❄️ заморозок: ${S.streak.fz||0}</span></div><div class="bar"><i style="width:${(sn%7)/7*100}%"></i></div><span style="font-size:12px">Каждые 7 дней серии — одна заморозка на пропущенный день</span></div>`}
+ <div class="glass hero"><div class="ring"><svg width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="rg"><stop offset="0" stop-color="#6ee7d8"/><stop offset="1" stop-color="#8f86ff"/></linearGradient></defs><circle class="t" cx="64" cy="64" r="${R}"/><circle class="p" cx="64" cy="64" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-to="${C*(1-frac)}"/></svg><div>${done}<small>з ${ids.length}</small></div></div>
+ <div class="hs"><div class="big">${left}</div><div>${pl(left,['нове','нові','нових'])} сьогодні</div><div class="big" style="font-size:28px">${due}</div><div style="margin:3px 0 0">на повторення</div></div></div>
+ ${all?`<div class="glass done"><h2>Ти все зробив на сьогодні 🎉</h2><p>Можна повторити складне або потренуватися вільно.</p></div><div class="two stack"><button class="btn" data-a="start" data-m="hard">Складні</button><button class="btn" data-a="start" data-m="free">Вільна</button></div>`
+ :`<div class="stack"><button class="btn pri big" data-a="start" data-m="day">${done>0||L.ok+L.bad>0?'Продовжити навчання':'Почати навчання'}</button>${left===0?'':due?`<button class="btn" data-a="start" data-m="review">Лише повторення · ${due}</button>`:''}</div>`}
+ <div class="grid"><div class="glass tile"><b>${L.nw}</b><span>Нові сьогодні</span></div><div class="glass tile"><b>${due}</b><span>На повторення</span></div><div class="glass tile"><b>${c.learned}</b><span>Вивчено всього</span></div><div class="glass tile"><b>${c.acc}%</b><span>Точність</span></div></div>
+ <div class="glass tile" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Серія: <b style="display:inline">${sn} ${pl(sn,['день','дні','днів'])}</b></span><span>❄️ заморозки: ${S.streak.fz||0}</span></div><div class="bar"><i style="width:${(sn%7)/7*100}%"></i></div><span style="font-size:12px">Кожні 7 днів серії — одна заморозка на пропущений день</span></div>`}
 const sel=(id,v,opts,ph)=>`<select id="${id}" aria-label="${ph}"><option value="">${ph}</option>${opts.map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
 function learn(){const due=dueList().length,left=ensurePlan().filter(id=>!isNewDone(id)).length,mk=mistakes().length,fv=[...S.prog.values()].filter(p=>p.fav).length,F=S.F;
  const row=(m,t,s,dis)=>`<button class="glass row" ${dis?'disabled style="opacity:.45"':`data-a="start" data-m="${m}"`}><div><b>${t}</b><span>${s}</span></div><em>›</em></button>`;
- return`<div class="top"><h1>Учить</h1></div>${row('day','Сегодняшний план',`${left} новых · ${due} повторений`,!left&&!due)}${row('review','Только повторение',due+' на сегодня',!due)}${row('hard','Сложные слова',mk+' в списке ошибок',!mk)}${row('fav','Избранное',fv+' слов',!fv)}
- <div class="lab">Свободная тренировка (20 заданий)</div><div class="sel" id="fsel">${sel('fc',F.cat,CATS,'Категория')}${sel('ft',F.topic,S.topics,'Тема')}${sel('fl',F.lvl,['A1-A2','B1-B2'],'Уровень')}</div><button class="btn" data-a="start" data-m="free">Начать тренировку</button>`}
+ return`<div class="top"><h1>Вчити</h1></div>${row('day','План на сьогодні',`${left} нових · ${due} повторень`,!left&&!due)}${row('review','Лише повторення',due+' на сьогодні',!due)}${row('hard','Складні слова',mk+' у списку помилок',!mk)}${row('fav','Обране',fv+' слів',!fv)}
+ <div class="lab">Вільне тренування (20 завдань)</div><div class="sel" id="fsel">${sel('fc',F.cat,CATS,'Категорія')}${sel('ft',F.topic,S.topics,'Тема')}${sel('fl',F.lvl,['A1-A2','B1-B2'],'Рівень')}</div><button class="btn" data-a="start" data-m="free">Почати тренування</button>`}
 function bars(a,mx){const n=a.length,w=300/n,M=mx||Math.max(1,...a.map(x=>x.v+(x.v2||0)));
  return`<svg class="ch" viewBox="0 0 300 118"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--a)"/><stop offset="1" stop-color="var(--b)"/></linearGradient></defs>${a.map((x,i)=>{const h1=x.v/M*84,h2=(x.v2||0)/M*84,bx=i*w+w*.17,bw=w*.66,r=Math.min(5,bw/2);
  return`<rect x="${bx}" y="${96-h1}" width="${bw}" height="${Math.max(h1,x.v?2:1)}" rx="${r}" fill="${x.v?'url(#g1)':'var(--tint)'}"/>${h2?`<rect x="${bx}" y="${96-h1-h2-1}" width="${bw}" height="${h2}" rx="${r}" fill="var(--hot)" opacity=".85"/>`:''}${n<=7||i%5===n%5?`<text x="${bx+bw/2}" y="112">${x.l}</text>`:''}`}).join('')}</svg>`}
 function line(v,lb){const M=Math.max(1,...v),n=v.length,pts=v.map((y,i)=>[i/(n-1)*300,90-y/M*78]),d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
  return`<svg class="ch" viewBox="0 0 300 112"><defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--a)" stop-opacity=".4"/><stop offset="1" stop-color="var(--a)" stop-opacity="0"/></linearGradient></defs><path d="${d} L300 90 L0 90Z" fill="url(#g2)"/><path d="${d}" fill="none" stroke="var(--a)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><text x="12" y="108">${lb[0]}</text><text x="288" y="108">${lb[1]}</text></svg>`}
-function stats(){const t=today(),c=counts(),L=S.logs.get(t)||{nw:0,rv:0},sn=streakNow(),secs=[...S.logs.values()].reduce((s,l)=>s+(l.secs||0),0),r=S.range,days=Array.from({length:r},(_,i)=>t-r+1+i),WD=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+function stats(){const t=today(),c=counts(),L=S.logs.get(t)||{nw:0,rv:0},sn=streakNow(),secs=[...S.logs.values()].reduce((s,l)=>s+(l.secs||0),0),r=S.range,days=Array.from({length:r},(_,i)=>t-r+1+i),WD=['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
  const lab=d=>r<=7?WD[new Date(d*864e5).getUTCDay()]:new Date(d*864e5).getUTCDate(),firsts=[...S.prog.values()].map(p=>p.first).filter(Boolean),
  act=days.map(d=>{const l=S.logs.get(d);return{v:l?l.rv:0,v2:l?l.nw:0,l:lab(d)}}),accs=days.map(d=>{const l=S.logs.get(d),n=l?l.ok+l.bad:0;return{v:n?Math.round(l.ok/n*100):0,l:lab(d)}}),cum=days.map(d=>firsts.filter(f=>f<=d).length),
  strk=Array.from({length:14},(_,i)=>{const d=t-13+i,l=S.logs.get(d);return l&&l.ok+l.bad>0?'on':''});
  const arr=S.items.filter(i=>!S.cl||i.level===S.cl),cats=CATS.map(k=>{const a=arr.filter(i=>i.category===k);if(!a.length)return'';const m=a.reduce((s,i)=>s+Math.min(7,P(i.id)?.stage||0)/7,0)/a.length,intro=a.filter(i=>P(i.id)?.first).length,pc=Math.round(m*100);
   return`<button class="glass cat" data-a="gocat" data-c="${esc(k)}"><div><span>${k}</span><small>${intro}/${a.length} · ${pc}%</small></div><div class="bar" style="display:block"><i style="width:${pc}%"></i></div></button>`}).join('');
- return`<div class="top"><h1>Статистика</h1></div><div class="grid"><div class="glass tile"><b>${c.intro}</b><span>Всего изучено</span></div><div class="glass tile"><b>${c.learned}</b><span>Выучено (ступень 7)</span></div><div class="glass tile"><b>${L.nw} / ${L.rv}</b><span>Новых / повторений сегодня</span></div><div class="glass tile"><b>${c.acc}%</b><span>${c.ok} верных, ${c.bad} ошибок</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>Серия</span></div><div class="glass tile"><b>${S.streak.best||0}</b><span>Лучшая серия</span></div></div>
- <div class="glass tile" style="margin-bottom:14px"><b>${secs>=3600?(secs/3600).toFixed(1)+' ч':Math.round(secs/60)+' мин'}</b><span>Время обучения</span></div>
- <div class="seg"><button class="${r===7?'on':''}" data-a="range" data-v="7">7 дней</button><button class="${r===30?'on':''}" data-a="range" data-v="30">30 дней</button></div>
- <div class="glass chbox"><div class="lab">Занятия по дням · <span style="color:var(--hot)">новые</span> / повторения</div>${bars(act)}</div>
- <div class="glass chbox"><div class="lab">Изучено слов (накопительно)</div>${line(cum,[lab(days[0]),'сегодня'])}</div>
- <div class="glass chbox"><div class="lab">Точность по дням, %</div>${bars(accs,100)}</div>
- <div class="glass chbox"><div class="lab">Серия — последние 14 дней</div><div class="dots">${strk.map(c=>`<i class="${c}"></i>`).join('')}</div><div style="height:8px"></div></div>
- <div class="lab" style="margin-top:20px">Категории</div><div class="seg">${[['','Все'],['A1-A2','A1-A2'],['B1-B2','B1-B2']].map(([v,l])=>`<button class="${S.cl===v?'on':''}" data-a="cl" data-v="${v}">${l}</button>`).join('')}</div>${cats}`}
-function words(){const W=S.W;return`<div class="top"><h1>Слова</h1></div><div class="seg">${[['all','Все'],['fav','⭐ Избранное'],['err','Мои ошибки']].map(([v,l])=>`<button class="${W.seg===v?'on':''}" data-a="wseg" data-v="${v}">${l}</button>`).join('')}</div><input type="search" id="wq" placeholder="Search vocabulary..." value="${esc(W.q)}"><div class="sel">${sel('wc',W.cat,CATS,'Категория')}${sel('wt',W.topic,S.topics,'Тема')}${sel('wl2',W.lvl,['A1-A2','B1-B2'],'Уровень')}</div>${W.seg==='err'?`<button class="btn pri" style="margin-bottom:14px" data-a="start" data-m="hard">Повторить сложные</button>`:''}<div id="wl"></div>`}
+ return`<div class="top"><h1>Статистика</h1></div><div class="grid"><div class="glass tile"><b>${c.intro}</b><span>Всього вивчено</span></div><div class="glass tile"><b>${c.learned}</b><span>Вивчено (ступінь 7)</span></div><div class="glass tile"><b>${L.nw} / ${L.rv}</b><span>Нових / повторень сьогодні</span></div><div class="glass tile"><b>${c.acc}%</b><span>${c.ok} вірних, ${c.bad} помилок</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>Серія</span></div><div class="glass tile"><b>${S.streak.best||0}</b><span>Найкраща серія</span></div></div>
+ <div class="glass tile" style="margin-bottom:14px"><b>${secs>=3600?(secs/3600).toFixed(1)+' год':Math.round(secs/60)+' хв'}</b><span>Час навчання</span></div>
+ <div class="seg"><button class="${r===7?'on':''}" data-a="range" data-v="7">7 днів</button><button class="${r===30?'on':''}" data-a="range" data-v="30">30 днів</button></div>
+ <div class="glass chbox"><div class="lab">Заняття по днях · <span style="color:var(--hot)">нові</span> / повторення</div>${bars(act)}</div>
+ <div class="glass chbox"><div class="lab">Вивчено слів (накопичувально)</div>${line(cum,[lab(days[0]),'сьогодні'])}</div>
+ <div class="glass chbox"><div class="lab">Точність по днях, %</div>${bars(accs,100)}</div>
+ <div class="glass chbox"><div class="lab">Серія — останні 14 днів</div><div class="dots">${strk.map(c=>`<i class="${c}"></i>`).join('')}</div><div style="height:8px"></div></div>
+ <div class="lab" style="margin-top:20px">Категорії</div><div class="seg">${[['','Всі'],['A1-A2','A1-A2'],['B1-B2','B1-B2']].map(([v,l])=>`<button class="${S.cl===v?'on':''}" data-a="cl" data-v="${v}">${l}</button>`).join('')}</div>${cats}`}
+function words(){const W=S.W;return`<div class="top"><h1>Слова</h1></div><div class="seg">${[['all','Всі'],['fav','⭐ Обране'],['err','Мої помилки']].map(([v,l])=>`<button class="${W.seg===v?'on':''}" data-a="wseg" data-v="${v}">${l}</button>`).join('')}</div><input type="search" id="wq" placeholder="Пошук слів..." value="${esc(W.q)}"><div class="sel">${sel('wc',W.cat,CATS,'Категорія')}${sel('wt',W.topic,S.topics,'Тема')}${sel('wl2',W.lvl,['A1-A2','B1-B2'],'Рівень')}</div>${W.seg==='err'?`<button class="btn pri" style="margin-bottom:14px" data-a="start" data-m="hard">Повторити складні</button>`:''}<div id="wl"></div>`}
 function wlist(){const W=S.W,q=W.q.trim().toLowerCase();let list=S.items;
  if(W.seg==='fav')list=list.filter(i=>P(i.id)?.fav);if(W.seg==='err'){const m=new Map(mistakes().map((p,i)=>[p.id,i]));list=list.filter(i=>m.has(i.id)).sort((a,b)=>m.get(a.id)-m.get(b.id))}
  list=list.filter(i=>(!W.cat||i.category===W.cat)&&(!W.topic||(i.topics||[]).includes(W.topic))&&(!W.lvl||i.level===W.lvl)&&(!q||i._s.includes(q)));
- if(!list.length)return`<p class="hint" style="text-align:center;padding:30px 0">${W.seg==='fav'?'Нажми ☆ на карточке слова, чтобы сохранить его сюда':W.seg==='err'?'Ошибок пока нет — отлично!':'Ничего не найдено'}</p>`;
+ if(!list.length)return`<p class="hint" style="text-align:center;padding:30px 0">${W.seg==='fav'?'Натисни ☆ на картці слова, щоб зберегти його сюди':W.seg==='err'?'Помилок поки немає — чудово!':'Нічого не знайдено'}</p>`;
  const part=list.slice(0,W.n);return part.map(i=>{const p=P(i.id),pc=p&&p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100):null;
-  return`<button class="glass row" data-a="open" data-id="${i.id}"><div><b>${esc(strip(i.en))}</b><span>${esc(i.uk)}</span></div><em>${W.seg==='err'&&pc!==null?`<span class="mark${pc>=70?' g':''}">${pc}%</span><br>`:''}${esc([i.level,(i.topics||[])[0]].filter(Boolean).join(' · '))}${p&&p.fav?' ⭐':''}</em></button>`}).join('')+(list.length>W.n?`<button class="btn" data-a="moreW">Показать ещё (${list.length-W.n})</button>`:'')}
+  return`<button class="glass row" data-a="open" data-id="${i.id}"><div><b>${esc(strip(i.en))}</b><span>${esc(i.uk)}</span></div><em>${W.seg==='err'&&pc!==null?`<span class="mark${pc>=70?' g':''}">${pc}%</span><br>`:''}${esc([i.level,(i.topics||[])[0]].filter(Boolean).join(' · '))}${p&&p.fav?' ⭐':''}</em></button>`}).join('')+(list.length>W.n?`<button class="btn" data-a="moreW">Показати ще (${list.length-W.n})</button>`:'')}
 function fillList(){$('#wl').innerHTML=wlist()}
 function bindWords(){fillList();let t;$('#wq').oninput=e=>{clearTimeout(t);t=setTimeout(()=>{S.W.q=e.target.value;S.W.n=60;fillList()},140)};
  [['wc','cat'],['wt','topic'],['wl2','lvl']].forEach(([id,k])=>{$('#'+id).onchange=e=>{S.W[k]=e.target.value;S.W.n=60;fillList()}})}
 function settings(){const s=S.st,tg=(k,l)=>`<div class="sr"><span>${l}</span><button class="sw ${s[k]?'on':''}" data-a="tog" data-k="${k}" role="switch" aria-checked="${!!s[k]}" aria-label="${l}"></button></div>`,cats=s.cats||CATS;
- return`<div class="top"><h1>Настройки</h1></div><div class="lab">Слов в день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div>
- <div class="lab">Уровень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Оба']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div>
- <div class="lab">Темы и категории для новых слов</div><div class="chips">${CATS.map(c=>`<button class="chip ${cats.includes(c)?'on':''}" data-a="cat" data-c="${esc(c)}">${c}</button>`).join('')}</div>
- <div class="lab">Оформление</div><div class="seg">${[['dark','Тёмная'],['light','Светлая'],['auto','Авто']].map(([v,l])=>`<button class="${s.theme===v?'on':''}" data-a="theme" data-v="${v}">${l}</button>`).join('')}</div>
- <div class="glass set">${tg('sound','Озвучка (авто-произношение)')}${tg('haptic','Вибрация')}${tg('anim','Анимации')}${tg('reduce','Уменьшить движение')}</div>
- <div class="lab">Данные</div><div class="stack"><button class="btn" data-a="export">Экспорт прогресса (JSON)</button><button class="btn" data-a="import">Импорт прогресса</button><button class="btn" style="color:var(--no)" data-a="reset">Сбросить прогресс</button></div><input type="file" id="imp" accept="application/json,.json" hidden>
- <p class="hint" style="text-align:center">NMT Vocabulary · ${S.items.length} элементов · всё хранится только на этом устройстве</p>`}
+ return`<div class="top"><h1>Налаштування</h1></div><div class="lab">Слів на день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div>
+ <div class="lab">Рівень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Обидва']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div>
+ <div class="lab">Теми й категорії для нових слів</div><div class="chips">${CATS.map(c=>`<button class="chip ${cats.includes(c)?'on':''}" data-a="cat" data-c="${esc(c)}">${c}</button>`).join('')}</div>
+ <div class="lab">Оформлення</div><div class="seg">${[['dark','Темна'],['light','Світла'],['auto','Авто']].map(([v,l])=>`<button class="${s.theme===v?'on':''}" data-a="theme" data-v="${v}">${l}</button>`).join('')}</div>
+ <div class="glass set">${tg('sound','Озвучення (авто-вимова)')}${tg('haptic','Вібрація')}${tg('anim','Анімації')}${tg('reduce','Зменшити рух')}</div>
+ <div class="lab">Дані</div><div class="stack"><button class="btn" data-a="export">Експорт прогресу (JSON)</button><button class="btn" data-a="import">Імпорт прогресу</button><button class="btn" style="color:var(--no)" data-a="reset">Скинути прогрес</button></div><input type="file" id="imp" accept="application/json,.json" hidden>
+ <p class="hint" style="text-align:center">NMT Vocabulary · ${S.items.length} елементів · усе зберігається лише на цьому пристрої</p>`}
 function openDetail(id){const it=S.byId.get(id),p=P(id)||{stage:0,ok:0,bad:0,due:0,first:0},t=today();
- const nx=!p.first?'—':p.stage>=7?'выучено':p.due<=t?'сегодня':'через '+(p.due-t)+' дн.';
- $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступень ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% верно':'ещё не отвечал'}</span></div></div><button class="btn" data-a="closeSheet">Закрыть</button></div>`;
+ const nx=!p.first?'—':p.stage>=7?'вивчено':p.due<=t?'сьогодні':'за '+(p.due-t)+' дн.';
+ $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступінь ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% вірно':'ще не відповідав'}</span></div></div><button class="btn" data-a="closeSheet">Закрити</button></div>`;
  $('#sheet').classList.add('open')}
 function confetti(){if(S.st.reduce||!S.st.anim)return;const c=$('#fx'),x=c.getContext('2d');c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;const cs=['#6ee7d8','#8f86ff','#ffb36b','#ff6b9a','#5be3a1'],d=devicePixelRatio,
  ps=Array.from({length:130},()=>({x:innerWidth/2*d,y:innerHeight*.35*d,vx:(Math.random()-.5)*16*d,vy:(-Math.random()*14-4)*d,s:(4+Math.random()*6)*d,r:Math.random()*6,vr:(Math.random()-.5)*.4,c:pick(cs)}));let f=0;
@@ -234,7 +234,7 @@ const ACT={
  next(){nextQ()},
  opt(d,b){const Q=S.Q;if(Q.locked)return;const x=Q.ex,i=+d.i,ok=i===x.ci,bs=document.querySelectorAll('.opt');bs[i].classList.add(ok?'ok':'no');if(!ok)bs[x.ci].classList.add('ok');resolve(ok,ok?2:0)},
  chk(){checkType(false)},idk(){checkType(true)},
- show(){const c=$('#cd');c.classList.add('on');hap();if(S.st.sound)say(S.Q.ex.it);$('#rt').innerHTML=`<div class="rates">${[[0,'😵 Не знаю'],[1,'😐 Сложно'],[2,'🙂 Хорошо'],[3,'🔥 Легко']].map(([g,l])=>`<button class="btn" data-a="rate" data-g="${g}">${l}</button>`).join('')}</div>`},
+ show(){const c=$('#cd');c.classList.add('on');hap();if(S.st.sound)say(S.Q.ex.it);$('#rt').innerHTML=`<div class="rates">${[[0,'😵 Не знаю'],[1,'😐 Важко'],[2,'🙂 Добре'],[3,'🔥 Легко']].map(([g,l])=>`<button class="btn" data-a="rate" data-g="${g}">${l}</button>`).join('')}</div>`},
  rate(d){rateCard(+d.g)},
  ml(d,b){const e=S.Q.cur;document.querySelectorAll('[data-a=ml]').forEach(x=>x.classList.remove('sel'));if(b.classList.contains('dn'))return;b.classList.add('sel');e.left=+d.id},
  mr(d,b){const Q=S.Q,e=Q.cur;if(e.left==null||b.classList.contains('dn'))return;
@@ -247,14 +247,14 @@ const ACT={
  open(d){openDetail(+d.id)},closeSheet(){$('#sheet').classList.remove('open')},
  goal(d){S.st.goal=+d.v;saveSt();ensurePlan();render()},
  lvl(d){S.st.level=d.v;saveSt();ensurePlan();render()},
- cat(d){const c=new Set(S.st.cats||CATS);c.has(d.c)?c.delete(d.c):c.add(d.c);if(!c.size)return toast('Нужна хотя бы одна категория');S.st.cats=c.size===CATS.length?null:CATS.filter(x=>c.has(x));saveSt();ensurePlan();render()},
+ cat(d){const c=new Set(S.st.cats||CATS);c.has(d.c)?c.delete(d.c):c.add(d.c);if(!c.size)return toast('Потрібна хоча б одна категорія');S.st.cats=c.size===CATS.length?null:CATS.filter(x=>c.has(x));saveSt();ensurePlan();render()},
  theme(d){S.st.theme=d.v;saveSt();applyTheme();render()},
  tog(d){S.st[d.k]=!S.st[d.k];if(d.k==='reduce'&&S.st.reduce)S.st.anim=false;saveSt();applyTheme();render()},
  onbgo(){S.st.onboarded=true;saveSt();document.body.classList.remove('sess');render();startSession('day')},
  export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}},
  import(){$('#imp').click()},
- async reset(){if(!confirm('Сбросить весь прогресс? Настройки сохранятся.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('settings',S.st);saveKV('streak',S.streak);toast('Прогресс сброшен');render()}};
+ async reset(){if(!confirm('Скинути весь прогрес? Налаштування збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('settings',S.st);saveKV('streak',S.streak);toast('Прогрес скинуто');render()}};
 function rateCard(g){const Q=S.Q;if(Q.locked)return;Q.locked=true;logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(Q.cur,g);hap();updPb();Q.tm=setTimeout(nextQ,260)}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&ACT[b.dataset.a])ACT[b.dataset.a](b.dataset,b,e);else if(e.target.id==='sheet')ACT.closeSheet()});
 document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn,.opt');if(!b)return;const r=b.getBoundingClientRect();b.style.setProperty('--x',e.clientX-r.left+'px');b.style.setProperty('--y',e.clientY-r.top+'px');b.classList.remove('rp');void b.offsetWidth;b.classList.add('rp')});
@@ -268,8 +268,8 @@ const swEnd=()=>{if(!sw)return;const{c,dx}=sw;sw=null;c.style.transition='transf
  if(Math.abs(dx)>90&&!S.Q.locked){c.style.transform=`translateX(${dx>0?500:-500}px) rotate(${dx/10}deg)`;rateCard(dx>0?2:0)}
  else{c.style.transform='';if(Math.abs(dx)<8&&!c.classList.contains('on'))ACT.show()}};
 document.addEventListener('pointerup',swEnd);document.addEventListener('pointercancel',swEnd);
-async function importFile(f){if(!f)return;try{const j=JSON.parse(await f.text());if(j.app!=='nmt-vocab'||!Array.isArray(j.prog))throw 0;if(!confirm('Заменить текущий прогресс импортированным?'))return;
- await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не удалось прочитать файл')}}
+async function importFile(f){if(!f)return;try{const j=JSON.parse(await f.text());if(j.app!=='nmt-vocab'||!Array.isArray(j.prog))throw 0;if(!confirm('Замінити поточний прогрес імпортованим?'))return;
+ await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не вдалося прочитати файл')}}
 
 /* ---------- запуск ---------- */
 async function init(){
@@ -284,4 +284,4 @@ async function init(){
  if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
  setTimeout(()=>document.querySelectorAll('.ring .p').forEach(c=>c.style.strokeDashoffset=c.dataset.to),60)}
 const _r=render;render=function(){_r();setTimeout(()=>document.querySelectorAll('.ring .p').forEach(c=>c.style.strokeDashoffset=c.dataset.to),60)};
-init().catch(e=>{$('#app').innerHTML='<div class="view"><h1>Ошибка запуска</h1><p class="hint">Открой приложение через веб-сервер (не file://). '+esc(e.message)+'</p></div>'});
+init().catch(e=>{$('#app').innerHTML='<div class="view"><h1>Помилка запуску</h1><p class="hint">Відкрий застосунок через веб-сервер (не file://). '+esc(e.message)+'</p></div>'});
