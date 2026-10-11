@@ -78,3 +78,11 @@ input:focus,select:focus{border-color:var(--a)}select{font-size:14px;padding:0 1
 .calm *,.calm *::before,.calm *::after{animation:none!important;transition:none!important}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 :focus-visible{outline:2px solid var(--a);outline-offset:2px}
+#undo{position:fixed;z-index:30;left:14px;right:14px;bottom:calc(var(--sb) + 86px);max-width:520px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:18px;background:linear-gradient(160deg,var(--g1),var(--g2)),var(--bg);box-shadow:0 8px 24px rgba(0,0,0,.2);font-size:14px}
+#undo[hidden]{display:none}#undo button{color:var(--a);font-weight:700;min-height:40px;padding:0 8px;flex-shrink:0}
+#undo [role="status"]{flex:1;min-width:0}.undo-clock{position:relative;width:36px;height:36px;flex-shrink:0;color:var(--a)}.undo-clock svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}.undo-clock circle{fill:none;stroke-width:3}.undo-track{stroke:var(--bd)}.undo-progress{stroke:var(--a);stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:0}.undo-clock b{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;font-variant-numeric:tabular-nums}
+/* додавання власних слів */
+.fld{width:100%;min-height:48px;padding:0 16px;border-radius:16px;background:var(--tint);border:1px solid var(--bd);outline:0;font-size:17px;-webkit-appearance:none;appearance:none}
+.fld:focus{border-color:var(--a)}.rw{display:flex;gap:8px;align-items:center}.rw .fld{flex:1;min-width:0}
+.am{margin:12px 2px;font-size:14px;line-height:1.45}.am.bad{color:var(--no)}.am.ok{color:var(--ok)}
+.am .ar{padding:3px 0;color:var(--ink)}.am small{color:var(--mut)}.am .chips{margin:8px 0 0}

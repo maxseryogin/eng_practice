@@ -16,13 +16,14 @@ const shuf=a=>{a=a.slice();for(let i=a.length;i>1;){const j=Math.random()*i--|0;
 const pl=(n,w)=>w[n%10===1&&n%100!==11?0:n%10>=2&&n%10<=4&&(n%100<10||n%100>=20)?1:2];
 const CATS=['Vocabulary','Idioms','Collocations','Verb + preposition','Phrasal verbs','Synonyms','Antonyms','Word formation','Formal vs informal'];
 const DEF={goal:8,level:'both',cats:null,sound:true,haptic:true,theme:'dark',anim:true,reduce:false,onboarded:false};
-const S={items:[],byId:new Map(),prog:new Map(),logs:new Map(),st:{},streak:{},plan:{day:-1,ids:[]},tab:'home',W:{seg:'all',q:'',cat:'',topic:'',lvl:'',n:60},F:{cat:'',topic:'',lvl:''},range:7,cl:'',Q:null,topics:[]};
+const S={items:[],byId:new Map(),prog:new Map(),logs:new Map(),st:{},streak:{},plan:{day:-1,ids:[]},tab:'home',W:{seg:'all',q:'',cat:'',topic:'',lvl:'',n:60},F:{cat:'',topic:'',lvl:''},range:7,cl:'',Q:null,topics:[],custom:[]};
 
 /* ---------- IndexedDB ---------- */
 const DB={d:null,
  open(){return new Promise((ok,no)=>{const r=indexedDB.open('nmtvocab',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('prog',{keyPath:'id'});d.createObjectStore('log',{keyPath:'d'});d.createObjectStore('kv',{keyPath:'k'})};r.onsuccess=()=>{this.d=r.result;ok()};r.onerror=()=>no(r.error)})},
  all(s){return new Promise(ok=>{if(!this.d)return ok([]);const q=this.d.transaction(s).objectStore(s).getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>ok([])})},
  put(s,v){try{this.d.transaction(s,'readwrite').objectStore(s).put(v)}catch(e){}},
+ del(s,k){try{this.d.transaction(s,'readwrite').objectStore(s).delete(k)}catch(e){}},
  clear(){return new Promise(ok=>{if(!this.d)return ok();const t=this.d.transaction(['prog','log','kv'],'readwrite');['prog','log','kv'].forEach(s=>t.objectStore(s).clear());t.oncomplete=ok})}};
 const P=id=>S.prog.get(id),saveP=p=>DB.put('prog',p),saveL=l=>DB.put('log',l),saveKV=(k,v)=>DB.put('kv',{k,v});
 const logOf=d=>{let l=S.logs.get(d);if(!l){l={d,nw:0,rv:0,ok:0,bad:0,secs:0};S.logs.set(d,l)}return l};
@@ -42,6 +43,33 @@ const speakText=it=>strip(it.en.replace('→',', ')).replace(/\(.*?\)/g,'');
 function say(it){try{const u=new SpeechSynthesisUtterance(typeof it==='string'?it:speakText(it));u.lang='en-US';u.rate=.9;const v=speechSynthesis.getVoices().find(v=>/^en[-_]US/.test(v.lang));if(v)u.voice=v;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function hap(){if(!S.st.haptic)return;try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}try{$('#hl').click()}catch(e){}}
 let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),2400)}
+let deletedWords=[],undoTimer,undoTick,undoUntil=0;
+function clearWordUndo(){clearTimeout(undoTimer);clearInterval(undoTick);deletedWords=[];undoUntil=0;$('#undo').hidden=true}
+function updateUndoClock(){
+ const left=Math.max(0,undoUntil-Date.now());
+ $('#undo-count').textContent=Math.ceil(left/1000);
+ $('#undo .undo-progress').style.strokeDashoffset=100*(1-left/5000);
+ if(!left)clearWordUndo();
+}
+function showWordUndo(){
+ clearTimeout(undoTimer);clearInterval(undoTick);undoUntil=Date.now()+5000;
+ const box=$('#undo');box.hidden=false;
+ $('[role="status"]',box).textContent=deletedWords.length===1?'Слово видалено':`Видалено слів: ${deletedWords.length}`;
+ updateUndoClock();undoTick=setInterval(updateUndoClock,50);
+ undoTimer=setTimeout(clearWordUndo,5000);
+}
+function undoWords(){
+ if(Date.now()>=undoUntil)return clearWordUndo();
+ const pending=deletedWords.slice();clearWordUndo();
+ for(const saved of pending.reverse()){
+  const {item,progress,itemIndex,customIndex,planIndex,planDay}=saved;
+  S.custom.splice(Math.min(customIndex,S.custom.length),0,item);
+  S.items.splice(Math.min(itemIndex,S.items.length),0,item);indexItem(item);
+  if(progress){S.prog.set(item.id,progress);saveP(progress)}
+  if(planIndex>=0&&S.plan.day===planDay&&!S.plan.ids.includes(item.id))S.plan.ids.splice(Math.min(planIndex,S.plan.ids.length),0,item.id);
+ }
+ saveKV('custom',S.custom);saveKV('plan',S.plan);render();toast('Повернуто ✓');
+}
 function applyTheme(){const th=S.st.theme,dk=th==='dark'||(th==='auto'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dk?'dark':'light';document.documentElement.classList.toggle('calm',S.st.reduce||!S.st.anim);$('meta[name=theme-color]').content=dk?'#05070f':'#eef1fb'}
 
 /* ---------- планирование дня ---------- */
@@ -138,17 +166,17 @@ function extras(it){const r=[],add=(k,v)=>{if(v&&(!Array.isArray(v)||v.length))r
  add('Синоніми',it.synonyms);add('Антонім',it.antonym&&it.antonym+(it.antonym_uk?' — '+it.antonym_uk:''));add('Informal',it.informal);add('Базове дієслово',it.base_verb);
  add('Правило',it.rule);add('Група',it.group);add('Нотатка',it.note);if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синонім для',it.synonym_of);
  return r.length?`<div class="ext">${r.join('')}</div>`:''}
-function studyV(it){return`<div class="lab">Нове</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
+function studyV(it){return`<div class="lab">Нове</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
 function exV(x){const it=x.it;
- if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
+ if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
  if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div><div id="fb"></div>`;
  return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div><div id="fb"></div>`}
 function matchV(e){const its=e.ids.map(id=>S.byId.get(id));e.bad=new Set();e.left=null;e.n=0;
  return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(i.uk)}</span></button>`).join('')}</div></div><div id="fb"></div>`}
 function resolve(ok,g){const Q=S.Q;if(Q.locked)return;Q.locked=true;const e=Q.cur,it=S.byId.get(e.id);
  logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(e,g);hap();if(S.st.sound)say(it);updPb();
- $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
- const c=$('.qcard');if(c){c.classList.add(ok?'pop':'shake')}if(ok&&!it.example)Q.tm=setTimeout(nextQ,950);
+ $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
+ const c=$('.qcard');if(c){c.classList.add(ok?'pop':'shake')}if(ok&&(it.custom||!it.example))Q.tm=setTimeout(nextQ,950);
  $('#fb').scrollIntoView({block:'nearest',behavior:'smooth'})}
 function checkType(giveUp){const Q=S.Q;if(Q.locked)return;const inp=$('#ti'),ok=!giveUp&&Q.ex.ans.includes(norm(inp.value));if(!giveUp&&!inp.value.trim())return;inp.classList.add(ok?'ok':'no');inp.blur();resolve(ok,ok?2:0)}
 function finish(){const Q=S.Q,t=today(),L=S.logs.get(t)||{};Q.queue=[];Q.cur=null;checkStreak();const acc=Q.ok+Q.bad?Math.round(Q.ok/(Q.ok+Q.bad)*100):0,sn=streakNow();
@@ -196,11 +224,11 @@ function stats(){const t=today(),c=counts(),L=S.logs.get(t)||{nw:0,rv:0},sn=stre
  <div class="glass chbox"><div class="lab">Точність по днях, %</div>${bars(accs,100)}</div>
  <div class="glass chbox"><div class="lab">Серія — останні 14 днів</div><div class="dots">${strk.map(c=>`<i class="${c}"></i>`).join('')}</div><div style="height:8px"></div></div>
  <div class="lab" style="margin-top:20px">Категорії</div><div class="seg">${[['','Всі'],['A1-A2','A1-A2'],['B1-B2','B1-B2']].map(([v,l])=>`<button class="${S.cl===v?'on':''}" data-a="cl" data-v="${v}">${l}</button>`).join('')}</div>${cats}`}
-function words(){const W=S.W;return`<div class="top"><h1>Слова</h1></div><div class="seg">${[['all','Всі'],['fav','⭐ Обране'],['err','Мої помилки']].map(([v,l])=>`<button class="${W.seg===v?'on':''}" data-a="wseg" data-v="${v}">${l}</button>`).join('')}</div><input type="search" id="wq" placeholder="Пошук слів..." value="${esc(W.q)}"><div class="sel">${sel('wc',W.cat,CATS,'Категорія')}${sel('wt',W.topic,S.topics,'Тема')}${sel('wl2',W.lvl,['A1-A2','B1-B2'],'Рівень')}</div>${W.seg==='err'?`<button class="btn pri" style="margin-bottom:14px" data-a="start" data-m="hard">Повторити складні</button>`:''}<div id="wl"></div>`}
+function words(){const W=S.W;return`<div class="top"><h1>Слова</h1><button class="btn sm pri" data-a="addw">＋ Додати</button></div><div class="seg">${[['all','Всі'],['fav','⭐ Обране'],['err','Помилки'],['my','Додані']].map(([v,l])=>`<button class="${W.seg===v?'on':''}" data-a="wseg" data-v="${v}">${l}</button>`).join('')}</div><input type="search" id="wq" placeholder="Пошук слів..." value="${esc(W.q)}"><div class="sel">${sel('wc',W.cat,CATS,'Категорія')}${sel('wt',W.topic,S.topics,'Тема')}${sel('wl2',W.lvl,['A1-A2','B1-B2'],'Рівень')}</div>${W.seg==='err'?`<button class="btn pri" style="margin-bottom:14px" data-a="start" data-m="hard">Повторити складні</button>`:''}<div id="wl"></div>`}
 function wlist(){const W=S.W,q=W.q.trim().toLowerCase();let list=S.items;
- if(W.seg==='fav')list=list.filter(i=>P(i.id)?.fav);if(W.seg==='err'){const m=new Map(mistakes().map((p,i)=>[p.id,i]));list=list.filter(i=>m.has(i.id)).sort((a,b)=>m.get(a.id)-m.get(b.id))}
+ if(W.seg==='fav')list=list.filter(i=>P(i.id)?.fav);if(W.seg==='my')list=list.filter(i=>i.custom);if(W.seg==='err'){const m=new Map(mistakes().map((p,i)=>[p.id,i]));list=list.filter(i=>m.has(i.id)).sort((a,b)=>m.get(a.id)-m.get(b.id))}
  list=list.filter(i=>(!W.cat||i.category===W.cat)&&(!W.topic||(i.topics||[]).includes(W.topic))&&(!W.lvl||i.level===W.lvl)&&(!q||i._s.includes(q)));
- if(!list.length)return`<p class="hint" style="text-align:center;padding:30px 0">${W.seg==='fav'?'Натисни ☆ на картці слова, щоб зберегти його сюди':W.seg==='err'?'Помилок поки немає — чудово!':'Нічого не знайдено'}</p>`;
+ if(!list.length)return`<p class="hint" style="text-align:center;padding:30px 0">${W.seg==='fav'?'Натисни ☆ на картці слова, щоб зберегти його сюди':W.seg==='my'?'Ти ще не додав власних слів':W.seg==='err'?'Помилок поки немає — чудово!':'Нічого не знайдено'}</p>`;
  const part=list.slice(0,W.n);return part.map(i=>{const p=P(i.id),pc=p&&p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100):null;
   return`<button class="glass row" data-a="open" data-id="${i.id}"><div><b>${esc(strip(i.en))}</b><span>${esc(i.uk)}</span></div><em>${W.seg==='err'&&pc!==null?`<span class="mark${pc>=70?' g':''}">${pc}%</span><br>`:''}${esc([i.level,(i.topics||[])[0]].filter(Boolean).join(' · '))}${p&&p.fav?' ⭐':''}</em></button>`}).join('')+(list.length>W.n?`<button class="btn" data-a="moreW">Показати ще (${list.length-W.n})</button>`:'')}
 function fillList(){$('#wl').innerHTML=wlist()}
@@ -216,11 +244,136 @@ function settings(){const s=S.st,tg=(k,l)=>`<div class="sr"><span>${l}</span><bu
  <p class="hint" style="text-align:center">NMT Vocabulary · ${S.items.length} елементів · усе зберігається лише на цьому пристрої</p>`}
 function openDetail(id){const it=S.byId.get(id),p=P(id)||{stage:0,ok:0,bad:0,due:0,first:0},t=today();
  const nx=!p.first?'—':p.stage>=7?'вивчено':p.due<=t?'сьогодні':'за '+(p.due-t)+' дн.';
- $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступінь ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% вірно':'ще не відповідав'}</span></div></div><button class="btn" data-a="closeSheet">Закрити</button></div>`;
+ $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступінь ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% вірно':'ще не відповідав'}</span></div></div>${it.custom?`<button class="btn" style="color:var(--no);margin-bottom:10px" data-a="delw" data-id="${id}">Видалити слово</button>`:''}<button class="btn" data-a="closeSheet">Закрити</button></div>`;
  $('#sheet').classList.add('open')}
 function confetti(){if(S.st.reduce||!S.st.anim)return;const c=$('#fx'),x=c.getContext('2d');c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;const cs=['#6ee7d8','#8f86ff','#ffb36b','#ff6b9a','#5be3a1'],d=devicePixelRatio,
  ps=Array.from({length:130},()=>({x:innerWidth/2*d,y:innerHeight*.35*d,vx:(Math.random()-.5)*16*d,vy:(-Math.random()*14-4)*d,s:(4+Math.random()*6)*d,r:Math.random()*6,vr:(Math.random()-.5)*.4,c:pick(cs)}));let f=0;
  (function tick(){x.clearRect(0,0,c.width,c.height);ps.forEach(p=>{p.vy+=.35*d;p.x+=p.vx;p.y+=p.vy;p.vx*=.99;p.r+=p.vr;x.save();x.translate(p.x,p.y);x.rotate(p.r);x.globalAlpha=Math.max(0,1-f/150);x.fillStyle=p.c;x.fillRect(-p.s/2,-p.s/4,p.s,p.s/2);x.restore()});if(++f<150)requestAnimationFrame(tick);else x.clearRect(0,0,c.width,c.height)})()}
+
+/* ---------- власні слова ---------- */
+const CYR=/[а-яіїєґ]/i,ADDCATS=['Vocabulary','Idioms','Collocations','Verb + preposition','Phrasal verbs'];
+const DT={'Verb + preposition':'Verbs with prepositions','Phrasal verbs':'Phrasal verbs','Idioms':'Idioms','Collocations':'Collocations'};
+const TL={а:'a',б:'b',в:'v',г:'h',ґ:'g',д:'d',е:'e',є:'ye',ж:'zh',з:'z',и:'y',і:'i',ї:'yi',й:'y',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'kh',ц:'ts',ч:'ch',ш:'sh',щ:'shch',ь:'',ю:'yu',я:'ya',"'":''};
+const translit=s=>[...s.toLowerCase()].map(c=>TL[c]??c).join('');
+function lev(a,b){if(a===b)return 0;let p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){const c=[i];for(let j=1;j<=b.length;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[b.length]}
+const bare=s=>norm(s).replace(/\([^)]*\)/g,'').replace(/^(to|be)\s+/,'').replace(/\s+/g,' ').trim();
+function findDup(en,cat){const k=bare(en),tk=k.split(' '),r={same:null,other:[],similar:[]};
+ for(const o of S.items){if(arrow(o))continue;const b=bare(o.en);if(!b)continue;
+  if(b===k){if(o.category===cat&&!r.same)r.same=o;else r.other.push(o);continue}
+  const to=b.split(' '),sub=(a,c)=>a.every(w=>c.includes(w)),
+   contain=to.length!==tk.length&&(sub(tk,to)||sub(to,tk)),
+   near=k.length>=4&&b.length>=4&&Math.abs(b.length-k.length)<=2&&lev(b,k)<=(k.length>=9?2:1);
+  if(contain||near)r.similar.push(o)}
+ const rank=o=>(o.category===cat?0:100)+Math.abs(bare(o.en).length-k.length);r.similar.sort((a,b)=>rank(a)-rank(b));return r}
+const dupList=a=>a.slice(0,5).map(o=>`<div class="ar"><b>${esc(strip(o.en))}</b> — ${esc(o.uk)} <small>${esc(o.category)}</small></div>`).join('')+(a.length>5?`<div class="ar">…і ще ${a.length-5}</div>`:'');
+/* переклад: Google gtx → запасний MyMemory */
+async function tfetch(u){const c=new AbortController(),t=setTimeout(()=>c.abort(),8000);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw 0;return await r.json()}finally{clearTimeout(t)}}
+async function tr(q,from,to){
+ try{const j=await tfetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&dt=bd&q=${encodeURIComponent(q)}`);
+  const main=(j[0]||[]).map(x=>x[0]).join('').trim(),alts=(j[1]||[]).flatMap(e=>e[1]||[]);
+  return{main,list:[...new Set([main,...alts].filter(Boolean))],dict:alts.length}}catch(e){}
+ try{const j=await tfetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${from}|${to}`);
+  const main=(j.responseData?.translatedText||'').trim(),low=q.toLowerCase(),
+   alts=(j.matches||[]).filter(m=>m.segment&&m.segment.toLowerCase()===low&&+m.match>=.8).map(m=>String(m.translation).trim());
+  return{main,list:[...new Set([main,...alts].filter(x=>x&&x.toLowerCase()!==low))],dict:null}}catch(e){}
+ return null}
+/* порівняння українських / англійських варіантів */
+const ukTok=s=>s.toLowerCase().replace(/[’`ʼ]/g,"'").replace(/\([^)]*\)/g,' ').split(/[^а-яіїєґ']+/).filter(w=>w.length>2);
+const stemEq=(a,b)=>{let i=0;while(i<a.length&&i<b.length&&a[i]===b[i])i++;const m=Math.min(a.length,b.length);return i>=(m<=4?m:Math.max(4,m-2))};
+function ukOk(a,b){const A=ukTok(a),B=ukTok(b);if(!A.length||!B.length)return a.trim().toLowerCase()===b.trim().toLowerCase();
+ const[s,l]=A.length<=B.length?[A,B]:[B,A];return s.every(w=>l.some(x=>stemEq(w,x)))}
+const STOP=['a','an','the','to','be','one'];
+function enOk(x,en){const a=bare(x),b=bare(en);if(a===b)return true;if(b.length>=4&&lev(a,b)<=1)return true;
+ const A=a.split(' ').filter(w=>!STOP.includes(w)),B=b.split(' ').filter(w=>!STOP.includes(w));if(!A.length||!B.length)return false;
+ const[s,l]=A.length<=B.length?[A,B]:[B,A];return s.every(w=>l.some(y=>y===w||(w.length>=4&&lev(w,y)<=1)))}
+const ask=h=>new Promise(r=>{S.askR=r;const am=$('#am');am.className='am';am.innerHTML=h+`<div class="two" style="margin-top:10px"><button class="btn" data-a="askno">Скасувати</button><button class="btn pri" data-a="askyes">Додати все одно</button></div>`});
+const TOPIC_HINTS={
+ 'Nature':'animal plant tree forest river ocean wildlife bark',
+ 'Weather':'weather rain snow wind storm temperature climate',
+ 'City and countryside':'city town village street urban rural',
+ 'Sport':'sport athlete athletic football tennis competition',
+ 'Health':'health medical doctor disease medicine hospital',
+ 'Home':'home house kitchen furniture household',
+ 'Travel':'travel tourism tourist journey destination hotel',
+ 'Holidays':'holiday celebration festival birthday christmas',
+ 'Education':'education school student teacher university study learn book publish publication publishing',
+ 'Hobbies and Leisure':'hobby leisure entertainment circus acrobat acrobatics performer performance music art theatre dance',
+ 'Transport':'transport vehicle car bus train airplane driving',
+ 'Shopping':'shopping buy sell purchase shop retail price',
+ 'Clothing':'clothing clothes dress shirt trousers fashion',
+ 'Work':'work job career employment employee employer business office salary profession professional',
+ 'Technology':'technology computer software digital internet device',
+ 'Emotions and Feelings':'emotion feeling aware awareness happy sad anger fear consciousness',
+ 'Food and Drinks':'food drink meal cooking eat bread fruit vegetable',
+ 'Family':'family parent child mother father marriage sibling'
+};
+const metaTokens=s=>String(s).toLowerCase().match(/[a-z]+|[а-яіїєґ]+/g)||[];
+function autoWordMeta(en,uk,meanings=[]){
+ const base=S.items.filter(o=>!o.custom),key=bare(en),exact=base.find(o=>bare(o.en)===key);
+ if(exact)return{category:exact.category,type:exact.type,level:exact.level||'B1-B2',topics:[...(exact.topics||[])],pos:exact.pos,metaVersion:2};
+ const words=key.split(' '),last=words.at(-1),first=words[0];
+ const pos=meanings[0]?.partOfSpeech||null;
+ const verb=pos==='verb'||base.some(o=>bare(o.en)===first&&(o.topics||[]).includes('Verbs'));
+ let category='Vocabulary',type=words.length>1?'phrase':'word';
+ if(words.length===2&&verb&&['up','out','off','down','away','back','over','on','in'].includes(last)){category='Phrasal verbs';type='phrasal_verb'}
+ else if(words.length===2&&verb&&['with','to','for','from','about','at','of','into'].includes(last)){category='Verb + preposition';type='verb_preposition'}
+ else if(words.length>1&&(/^(fully|well|highly|deeply|strongly|completely|perfectly|widely|closely|particularly|absolutely) /.test(key)||base.some(o=>o.type==='collocation'&&bare(o.en)===key))){category='Collocations';type='collocation'}
+ const direct=new Set(metaTokens(key)),translated=new Set(metaTokens(uk));
+ const context=new Set(metaTokens(meanings.flatMap(m=>(m.definitions||[]).slice(0,3).map(d=>d.definition||'')).join(' ')));
+ const scores=new Map();
+ const add=(topic,n)=>scores.set(topic,(scores.get(topic)||0)+n);
+ for(const [topic,hints] of Object.entries(TOPIC_HINTS))for(const token of hints.split(' ')){if(direct.has(token))add(topic,8);if(context.has(token))add(topic,2)}
+ // Whole translation tokens avoid false matches such as усвідомлювати / усміхатися.
+ const candidates=base.filter(o=>o.category==='Vocabulary').map(o=>{const ot=new Set(metaTokens(o.uk));return{o,n:[...translated].filter(t=>t.length>3&&ot.has(t)).length}}).filter(x=>x.n);
+ for(const {o,n} of candidates)for(const topic of o.topics||[])if(TOPIC_HINTS[topic])add(topic,n*3/candidates.length);
+ const ranked=[...scores].sort((a,b)=>b[1]-a[1]);
+ let topics=ranked.length?[ranked[0][0]]:[];
+ if(category!=='Vocabulary')topics=[DT[category]];
+ else if(!topics.length){
+  const grammatical={verb:'Verbs',adjective:'Adjectives',adverb:'Adverbs'};
+  if(grammatical[pos])topics=[grammatical[pos]];
+  else if(candidates.length)topics=[...(candidates[0].o.topics||[])];
+ }
+ const ref=candidates.sort((a,b)=>b.n-a.n)[0]?.o;
+ return{category,type,level:ref?.level||'B1-B2',topics,pos,metaVersion:2};
+}
+async function resolveWordMeta(en,uk){
+ const local=autoWordMeta(en,uk);
+ if(S.items.some(o=>!o.custom&&bare(o.en)===bare(en)))return local;
+ try{
+  const entries=await tfetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(bare(en)));
+  if(Array.isArray(entries))return autoWordMeta(en,uk,entries.flatMap(e=>e.meanings||[]));
+ }catch(e){}
+ return local;
+}
+function openAdd(){S.addTok=(S.addTok||0)+1;S.adding=false;S.askR=null;
+ $('#sheet').innerHTML=`<div class="glass"><h2 style="margin-bottom:14px">Додати слово</h2><input type="text" class="fld" id="ae" aria-label="Слово англійською" placeholder="Слово англійською" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><p class="hint">Переклад, категорія, рівень і тема — автоматично.</p><div id="am" class="am" role="status"></div><div class="stack"><button class="btn pri" id="adb" data-a="adgo">Додати</button><button class="btn" data-a="closeSheet">Закрити</button></div></div>`;
+ $('#sheet').classList.add('open');$('#ae').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addGo()}};setTimeout(()=>$('#ae')?.focus(),350)}
+async function addGo(){
+ if(S.adding)return;const tok=S.addTok,live=()=>tok===S.addTok&&$('#sheet').classList.contains('open')&&$('#ae');
+ const am=$('#am'),btn=$('#adb'),input=$('#ae'),msg=(h,c='')=>{if(live()){am.className='am '+c;am.innerHTML=h}};
+ S.adding=true;btn.disabled=true;input.disabled=true;
+ try{
+  let en=strip(input.value).replace(/\s+/g,' ').toLowerCase();
+  if(!en)return msg('Введи слово англійською','bad');
+  if(en.length>50||!/^[a-z][a-z0-9 '’\-\/().,…]*$/i.test(en))return msg('Введи англійське слово або вираз','bad');
+  const existing=S.items.find(o=>bare(o.en)===bare(en));
+  if(existing){openDetail(existing.id);toast('Це слово вже є у словнику');return}
+  if(!navigator.onLine)return msg('Для додавання нового слова потрібен інтернет','bad');
+  msg('Підбираю переклад і параметри…');
+  const fw=await tr(en,'en','uk');if(!live())return;
+  if(!fw)return msg('Не вдалося отримати переклад. Спробуй ще раз','bad');
+  const cands=[...new Set(fw.list.map(x=>x.toLowerCase()).filter(x=>CYR.test(x)))];
+  if(!cands.length)return msg('Переклад не знайдено. Перевір написання','bad');
+  if(fw.dict===0&&!en.includes(' ')&&lev(translit(cands[0]),en)<=Math.ceil(en.length*.4))return msg('Слово не знайдено. Перевір написання','bad');
+  const uk=cands[0],metadata=await resolveWordMeta(en,uk);if(!live())return;
+  const it={id:Math.max(100000,...S.custom.map(x=>x.id),...deletedWords.map(x=>x.item.id))+1,en,uk,...metadata,example:null,custom:true};
+  if(it.type==='phrasal_verb')it.base_verb=en.split(' ')[0];
+  S.custom.push(it);saveKV('custom',S.custom);indexItem(it);S.items.unshift(it);
+  ensurePlan();if(!S.plan.ids.includes(it.id)){S.plan.ids.unshift(it.id);ensurePlan()}
+  render();openDetail(it.id);toast('Слово додано ✓');
+ }finally{if(tok===S.addTok){S.adding=false;const b=$('#adb');if(b)b.disabled=false;const i=$('#ae');if(i)i.disabled=false}}}
+function indexItem(i){S.byId.set(i.id,i);(i.topics||[]).forEach(t=>{if(!S.topics.includes(t)){S.topics.push(t);S.topics.sort()}});i._s=[i.en,i.uk,i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()}
 
 /* ---------- действия ---------- */
 const ACT={
@@ -244,21 +397,32 @@ const ACT={
  range(d){S.range=+d.v;render()},cl(d){S.cl=d.v;render()},
  gocat(d){S.W={seg:'all',q:'',cat:d.c,topic:'',lvl:S.cl,n:60};S.tab='words';render()},
  wseg(d){S.W.seg=d.v;S.W.n=60;render()},moreW(){S.W.n+=80;fillList()},
- open(d){openDetail(+d.id)},closeSheet(){$('#sheet').classList.remove('open')},
+ open(d){openDetail(+d.id)},
+ closeSheet(){S.askR&&S.askR(false);S.askR=null;$('#sheet').classList.remove('open')},
+ addw(){openAdd()},adgo(){addGo()},
+ askyes(){const r=S.askR;S.askR=null;r&&r(true)},askno(){const r=S.askR;S.askR=null;r&&r(false)},
+ undow(){undoWords()},
+ delw(d){const id=+d.id,item=S.byId.get(id);if(!item?.custom)return;
+  if(deletedWords.length&&Date.now()>=undoUntil)clearWordUndo();
+  deletedWords.push({item,progress:S.prog.get(id),itemIndex:S.items.indexOf(item),customIndex:S.custom.findIndex(x=>x.id===id),planIndex:S.plan.ids.indexOf(id),planDay:S.plan.day});
+  S.custom=S.custom.filter(x=>x.id!==id);saveKV('custom',S.custom);
+  S.items=S.items.filter(x=>x.id!==id);S.byId.delete(id);S.prog.delete(id);DB.del('prog',id);S.plan.ids=S.plan.ids.filter(x=>x!==id);saveKV('plan',S.plan);
+  S.topics=[];S.items.forEach(indexItem);
+  ACT.closeSheet();render();showWordUndo()},
  goal(d){S.st.goal=+d.v;saveSt();ensurePlan();render()},
  lvl(d){S.st.level=d.v;saveSt();ensurePlan();render()},
  cat(d){const c=new Set(S.st.cats||CATS);c.has(d.c)?c.delete(d.c):c.add(d.c);if(!c.size)return toast('Потрібна хоча б одна категорія');S.st.cats=c.size===CATS.length?null:CATS.filter(x=>c.has(x));saveSt();ensurePlan();render()},
  theme(d){S.st.theme=d.v;saveSt();applyTheme();render()},
  tog(d){S.st[d.k]=!S.st[d.k];if(d.k==='reduce'&&S.st.reduce)S.st.anim=false;saveSt();applyTheme();render()},
  onbgo(){S.st.onboarded=true;saveSt();document.body.classList.remove('sess');render();startSession('day')},
- export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
+ export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan,custom:S.custom}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}},
  import(){$('#imp').click()},
- async reset(){if(!confirm('Скинути весь прогрес? Налаштування збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('settings',S.st);saveKV('streak',S.streak);toast('Прогрес скинуто');render()}};
+ async reset(){if(!confirm('Скинути весь прогрес? Налаштування й додані слова збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('custom',S.custom);saveKV('settings',S.st);saveKV('streak',S.streak);toast('Прогрес скинуто');render()}};
 function rateCard(g){const Q=S.Q;if(Q.locked)return;Q.locked=true;logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(Q.cur,g);hap();updPb();Q.tm=setTimeout(nextQ,260)}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&ACT[b.dataset.a])ACT[b.dataset.a](b.dataset,b,e);else if(e.target.id==='sheet')ACT.closeSheet()});
 document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn,.opt');if(!b)return;const r=b.getBoundingClientRect();b.style.setProperty('--x',e.clientX-r.left+'px');b.style.setProperty('--y',e.clientY-r.top+'px');b.classList.remove('rp');void b.offsetWidth;b.classList.add('rp')});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='ti')checkType(false)});
+document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='ti')checkType(false);else if(e.target.id==='ae'||e.target.id==='au')ACT.adgo()});
 document.addEventListener('change',e=>{if(e.target.id==='imp')importFile(e.target.files[0]);if(['fc','ft','fl'].includes(e.target.id))S.F={cat:$('#fc').value,topic:$('#ft').value,lvl:$('#fl').value}});
 /* свайп карточки: ← не знаю, → знаю */
 let sw=null;
@@ -272,14 +436,29 @@ async function importFile(f){if(!f)return;try{const j=JSON.parse(await f.text())
  await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не вдалося прочитати файл')}}
 
 /* ---------- запуск ---------- */
+async function refreshCustomMetadata(){
+ for(const it of S.custom){
+  if(it.metaVersion===2)continue;
+  const m=navigator.onLine?await resolveWordMeta(it.en,it.uk):autoWordMeta(it.en,it.uk);
+  if(!S.byId.has(it.id))continue;
+  Object.assign(it,m);if(!navigator.onLine)it.metaVersion=1;
+  indexItem(it);saveKV('custom',S.custom);
+ }
+ S.topics=[];S.items.forEach(indexItem);
+ if(!S.Q?.active){render();const id=+$('#sheet [data-a="speak"]')?.dataset.id;if($('#sheet').classList.contains('open')&&id&&S.byId.get(id)?.custom)openDetail(id)}
+}
 async function init(){
  try{await DB.open();navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
- const data=await(await fetch('data/vocab_nmt2026.json')).json();S.items=data.items;
- const tp=new Set();S.items.forEach(i=>{S.byId.set(i.id,i);(i.topics||[]).forEach(t=>tp.add(t));i._s=[i.en,i.uk,i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()});S.topics=[...tp].sort();
- (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
+ const data=await(await fetch('data/vocab_nmt2026.json')).json();
  const kv={};(await DB.all('kv')).forEach(r=>kv[r.k]=r.v);
+ S.custom=kv.custom||[];S.items=data.items;S.topics=[];
+ S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null});
+ saveKV('custom',S.custom);S.items=[...S.custom,...data.items];
+ S.items.forEach(indexItem);
+ (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
  S.st={...DEF,...(kv.settings||{})};S.streak=kv.streak||{n:0,best:0,last:-9,fz:0};S.plan=kv.plan||{day:-1,ids:[]};
  applyTheme();render();
+ refreshCustomMetadata();
  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!(S.Q&&S.Q.active)&&S.st.onboarded)render()});
  if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
  setTimeout(()=>document.querySelectorAll('.ring .p').forEach(c=>c.style.strokeDashoffset=c.dataset.to),60)}
