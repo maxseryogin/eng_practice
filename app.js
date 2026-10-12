@@ -266,17 +266,35 @@ function findDup(en,cat){const k=bare(en),tk=k.split(' '),r={same:null,other:[],
   if(contain||near)r.similar.push(o)}
  const rank=o=>(o.category===cat?0:100)+Math.abs(bare(o.en).length-k.length);r.similar.sort((a,b)=>rank(a)-rank(b));return r}
 const dupList=a=>a.slice(0,5).map(o=>`<div class="ar"><b>${esc(strip(o.en))}</b> — ${esc(o.uk)} <small>${esc(o.category)}</small></div>`).join('')+(a.length>5?`<div class="ar">…і ще ${a.length-5}</div>`:'');
-/* переклад: Google gtx → запасний MyMemory */
-async function tfetch(u){const c=new AbortController(),t=setTimeout(()=>c.abort(),8000);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw 0;return await r.json()}finally{clearTimeout(t)}}
-async function tr(q,from,to){
- try{const j=await tfetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&dt=bd&q=${encodeURIComponent(q)}`);
-  const main=(j[0]||[]).map(x=>x[0]).join('').trim(),alts=(j[1]||[]).flatMap(e=>e[1]||[]);
-  return{main,list:[...new Set([main,...alts].filter(Boolean))],dict:alts.length}}catch(e){}
- try{const j=await tfetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${from}|${to}`);
-  const main=(j.responseData?.translatedText||'').trim(),low=q.toLowerCase(),
-   alts=(j.matches||[]).filter(m=>m.segment&&m.segment.toLowerCase()===low&&+m.match>=.8).map(m=>String(m.translation).trim());
-  return{main,list:[...new Set([main,...alts].filter(x=>x&&x.toLowerCase()!==low))],dict:null}}catch(e){}
- return null}
+/* Fast, bounded requests; successful lookups are reused during this session. */
+async function tfetch(u,timeout=3000){const c=new AbortController(),t=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw Error('Lookup failed');return await r.json()}finally{clearTimeout(t)}}
+const translationCache=new Map(),dictionaryCache=new Map();
+const cleanTranslation=s=>String(s||'').replace(/["“”„«»]/g,'').replace(/^['‘’]+|['‘’]+$/g,'').replace(/\s+/g,' ').trim();
+function tr(q,from,to){
+ const key=from+'|'+to+'|'+q;if(translationCache.has(key))return translationCache.get(key);
+ const valid=r=>{r.main=cleanTranslation(r.main);r.list=[...new Set(r.list.map(cleanTranslation).filter(x=>x&&x.toLowerCase()!==q.toLowerCase()&&(to!=='uk'||CYR.test(x))))];if(!r.list.length)throw Error('No translation');return r};
+ const google=tfetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&dt=bd&q=${encodeURIComponent(q)}`).then(j=>{const main=(j[0]||[]).map(x=>x[0]).join(''),alts=(j[1]||[]).flatMap(e=>e[1]||[]);return valid({main,list:[main,...alts],dict:alts.length})});
+ const backup=tfetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${from}|${to}`).then(j=>{if(+j.responseStatus!==200)throw Error('Translation unavailable');const main=j.responseData?.translatedText||'',alts=(j.matches||[]).filter(m=>m.segment?.toLowerCase()===q.toLowerCase()&&+m.match>=.8).map(m=>m.translation);return valid({main,list:[main,...alts],dict:null})});
+ const pending=Promise.any([google,backup]).catch(()=>{translationCache.delete(key);return null});translationCache.set(key,pending);return pending;
+}
+function wordDictionary(en){
+ const key=bare(en);if(dictionaryCache.has(key))return dictionaryCache.get(key);
+ const pending=tfetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(key)).then(j=>{if(!Array.isArray(j))throw Error('No dictionary entry');return j.flatMap(e=>e.meanings||[])}).catch(()=>{dictionaryCache.delete(key);return []});
+ dictionaryCache.set(key,pending);return pending;
+}
+const PAST_FORMS={was:'be',were:'be',been:'be',went:'go',gone:'go',did:'do',done:'do',had:'have',got:'get',gotten:'get',made:'make',took:'take',taken:'take',gave:'give',given:'give',came:'come',became:'become',saw:'see',seen:'see',knew:'know',known:'know',thought:'think',bought:'buy',brought:'bring',caught:'catch',taught:'teach',found:'find',felt:'feel',left:'leave',lost:'lose',kept:'keep',slept:'sleep',spoke:'speak',spoken:'speak',wrote:'write',written:'write',ate:'eat',eaten:'eat',drank:'drink',drunk:'drink',drove:'drive',driven:'drive',ran:'run',swam:'swim',swum:'swim',sang:'sing',sung:'sing',began:'begin',begun:'begin',broke:'break',broken:'break',chose:'choose',chosen:'choose',fell:'fall',fallen:'fall',forgot:'forget',forgotten:'forget',sent:'send',spent:'spend',told:'tell',sold:'sell',paid:'pay',stood:'stand',understood:'understand',heard:'hear',held:'hold',won:'win',wore:'wear',worn:'wear',flew:'fly',flown:'fly',grew:'grow',grown:'grow',threw:'throw',thrown:'throw',met:'meet',built:'build',led:'lead',let:'let',put:'put',cut:'cut',read:'read'};
+function baseWord(input){
+ const words=input.toLowerCase().replace(/^to\s+/,'').split(' '),word=words[0];
+ const verbs=new Set('attend publish provide gather collect work play walk talk study try stop plan travel love live move use dance create help want need call ask watch start finish learn listen open close visit enjoy'.split(' '));
+ for(const it of S.items)if(it.pos==='verb'||it.topics?.includes('Verbs')||['phrasal_verb','verb_preposition'].includes(it.type))verbs.add(bare(it.en).split(' ')[0]);
+ let root=PAST_FORMS[word];
+ if(!root&&word.endsWith('ed')){
+  const stem=word.slice(0,-2),candidates=[word.endsWith('ied')?word.slice(0,-3)+'y':'',word.slice(0,-1),stem,/(.)\1$/.test(stem)?stem.slice(0,-1):''];
+  root=candidates.find(w=>verbs.has(w));
+ }
+ if(root)words[0]=root;
+ return words.join(' ');
+}
 /* порівняння українських / англійських варіантів */
 const ukTok=s=>s.toLowerCase().replace(/[’`ʼ]/g,"'").replace(/\([^)]*\)/g,' ').split(/[^а-яіїєґ']+/).filter(w=>w.length>2);
 const stemEq=(a,b)=>{let i=0;while(i<a.length&&i<b.length&&a[i]===b[i])i++;const m=Math.min(a.length,b.length);return i>=(m<=4?m:Math.max(4,m-2))};
@@ -338,13 +356,15 @@ function autoWordMeta(en,uk,meanings=[]){
  return{category,type,level:ref?.level||'B1-B2',topics,pos,metaVersion:2};
 }
 async function resolveWordMeta(en,uk){
- const local=autoWordMeta(en,uk);
- if(S.items.some(o=>!o.custom&&bare(o.en)===bare(en)))return local;
- try{
-  const entries=await tfetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(bare(en)));
-  if(Array.isArray(entries))return autoWordMeta(en,uk,entries.flatMap(e=>e.meanings||[]));
- }catch(e){}
- return local;
+ if(S.items.some(o=>!o.custom&&bare(o.en)===bare(en)))return autoWordMeta(en,uk);
+ return autoWordMeta(en,uk,await wordDictionary(en));
+}
+function enrichAddedWord(it,pending){
+ pending.then(meanings=>{
+  if(!meanings.length||S.byId.get(it.id)!==it)return;
+  Object.assign(it,autoWordMeta(it.en,it.uk,meanings));indexItem(it);saveKV('custom',S.custom);
+  if(!S.Q?.active){render();if($('#sheet').classList.contains('open')&&+$('#sheet [data-a="speak"]')?.dataset.id===it.id)openDetail(it.id)}
+ }).catch(()=>{});
 }
 function openAdd(){S.addTok=(S.addTok||0)+1;S.adding=false;S.askR=null;
  $('#sheet').innerHTML=`<div class="glass"><h2 style="margin-bottom:14px">Додати слово</h2><input type="text" class="fld" id="ae" aria-label="Слово англійською" placeholder="Слово англійською" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><p class="hint">Переклад, категорія, рівень і тема — автоматично.</p><div id="am" class="am" role="status"></div><div class="stack"><button class="btn pri" id="adb" data-a="adgo">Додати</button><button class="btn" data-a="closeSheet">Закрити</button></div></div>`;
@@ -357,21 +377,23 @@ async function addGo(){
   let en=strip(input.value).replace(/\s+/g,' ').toLowerCase();
   if(!en)return msg('Введи слово англійською','bad');
   if(en.length>50||!/^[a-z][a-z0-9 '’\-\/().,…]*$/i.test(en))return msg('Введи англійське слово або вираз','bad');
+  en=baseWord(en);
   const existing=S.items.find(o=>bare(o.en)===bare(en));
   if(existing){openDetail(existing.id);toast('Це слово вже є у словнику');return}
   if(!navigator.onLine)return msg('Для додавання нового слова потрібен інтернет','bad');
   msg('Підбираю переклад і параметри…');
+  const dictionary=wordDictionary(en);
   const fw=await tr(en,'en','uk');if(!live())return;
   if(!fw)return msg('Не вдалося отримати переклад. Спробуй ще раз','bad');
-  const cands=[...new Set(fw.list.map(x=>x.toLowerCase()).filter(x=>CYR.test(x)))];
+  const cands=[...new Set(fw.list.map(x=>cleanTranslation(x).toLowerCase()).filter(x=>CYR.test(x)))];
   if(!cands.length)return msg('Переклад не знайдено. Перевір написання','bad');
   if(fw.dict===0&&!en.includes(' ')&&lev(translit(cands[0]),en)<=Math.ceil(en.length*.4))return msg('Слово не знайдено. Перевір написання','bad');
-  const uk=cands[0],metadata=await resolveWordMeta(en,uk);if(!live())return;
+  const uk=cands[0],metadata=autoWordMeta(en,uk);
   const it={id:Math.max(100000,...S.custom.map(x=>x.id),...deletedWords.map(x=>x.item.id))+1,en,uk,...metadata,example:null,custom:true};
   if(it.type==='phrasal_verb')it.base_verb=en.split(' ')[0];
   S.custom.push(it);saveKV('custom',S.custom);indexItem(it);S.items.unshift(it);
   ensurePlan();if(!S.plan.ids.includes(it.id)){S.plan.ids.unshift(it.id);ensurePlan()}
-  render();openDetail(it.id);toast('Слово додано ✓');
+  render();openDetail(it.id);toast('Слово додано ✓');enrichAddedWord(it,dictionary);
  }finally{if(tok===S.addTok){S.adding=false;const b=$('#adb');if(b)b.disabled=false;const i=$('#ae');if(i)i.disabled=false}}}
 function indexItem(i){S.byId.set(i.id,i);(i.topics||[]).forEach(t=>{if(!S.topics.includes(t)){S.topics.push(t);S.topics.sort()}});i._s=[i.en,i.uk,i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()}
 
@@ -436,6 +458,25 @@ async function importFile(f){if(!f)return;try{const j=JSON.parse(await f.text())
  await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не вдалося прочитати файл')}}
 
 /* ---------- запуск ---------- */
+function normalizeSavedWords(){
+ for(const it of [...S.custom]){
+  const canonical=baseWord(it.en);if(canonical===it.en)continue;
+  const target=S.items.find(o=>o.id!==it.id&&bare(o.en)===bare(canonical));
+  if(target){
+   const old=S.prog.get(it.id),current=S.prog.get(target.id);
+   if(old){
+    const progress=current?{...current,stage:Math.max(current.stage,old.stage),first:Math.min(...[current.first,old.first].filter(Boolean))||0,last:Math.max(current.last,old.last),due:Math.min(current.due,old.due),ok:current.ok+old.ok,bad:current.bad+old.bad,lapses:current.lapses+old.lapses,fav:current.fav||old.fav}:{...old,id:target.id};
+    S.prog.set(target.id,progress);saveP(progress);
+   }
+   S.prog.delete(it.id);DB.del('prog',it.id);
+   S.plan.ids=[...new Set(S.plan.ids.map(id=>id===it.id?target.id:id))];
+   S.custom=S.custom.filter(o=>o.id!==it.id);S.items=S.items.filter(o=>o.id!==it.id);S.byId.delete(it.id);
+  }else{
+   it.en=canonical;Object.assign(it,autoWordMeta(canonical,it.uk));it.metaVersion=1;indexItem(it);
+  }
+ }
+ S.topics=[];S.items.forEach(indexItem);saveKV('custom',S.custom);saveKV('plan',S.plan);
+}
 async function refreshCustomMetadata(){
  for(const it of S.custom){
   if(it.metaVersion===2)continue;
@@ -452,11 +493,12 @@ async function init(){
  const data=await(await fetch('data/vocab_nmt2026.json')).json();
  const kv={};(await DB.all('kv')).forEach(r=>kv[r.k]=r.v);
  S.custom=kv.custom||[];S.items=data.items;S.topics=[];
- S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null});
+ S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null;it.uk=cleanTranslation(it.uk)});
  saveKV('custom',S.custom);S.items=[...S.custom,...data.items];
  S.items.forEach(indexItem);
  (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
  S.st={...DEF,...(kv.settings||{})};S.streak=kv.streak||{n:0,best:0,last:-9,fz:0};S.plan=kv.plan||{day:-1,ids:[]};
+ normalizeSavedWords();
  applyTheme();render();
  refreshCustomMetadata();
  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!(S.Q&&S.Q.active)&&S.st.onboarded)render()});
