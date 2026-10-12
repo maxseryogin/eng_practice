@@ -16,7 +16,7 @@ const shuf=a=>{a=a.slice();for(let i=a.length;i>1;){const j=Math.random()*i--|0;
 const pl=(n,w)=>w[n%10===1&&n%100!==11?0:n%10>=2&&n%10<=4&&(n%100<10||n%100>=20)?1:2];
 const CATS=['Vocabulary','Idioms','Collocations','Verb + preposition','Phrasal verbs','Synonyms','Antonyms','Word formation','Formal vs informal'];
 const DEF={goal:8,level:'both',cats:null,sound:true,haptic:true,theme:'dark',anim:true,reduce:false,onboarded:false};
-const S={items:[],byId:new Map(),prog:new Map(),logs:new Map(),st:{},streak:{},plan:{day:-1,ids:[]},tab:'home',W:{seg:'all',q:'',cat:'',topic:'',lvl:'',n:60},F:{cat:'',topic:'',lvl:''},range:7,cl:'',Q:null,topics:[],custom:[]};
+const S={items:[],byId:new Map(),prog:new Map(),logs:new Map(),st:{},streak:{},plan:{day:-1,ids:[]},tab:'home',W:{seg:'all',q:'',cat:'',topic:'',lvl:'',n:60},F:{cat:'',topic:'',lvl:''},range:7,cl:'',Q:null,topics:[],custom:[],hints:{day:-1,used:0}};
 
 /* ---------- IndexedDB ---------- */
 const DB={d:null,
@@ -74,16 +74,35 @@ function applyTheme(){const th=S.st.theme,dk=th==='dark'||(th==='auto'&&matchMed
 
 /* ---------- планирование дня ---------- */
 const inScope=i=>(!S.st.cats||S.st.cats.includes(i.category))&&(S.st.level==='both'||!i.level||i.level===S.st.level);
+const wordBucket=i=>i.category==='Vocabulary'?(i.custom?'own':'base'):'expr';
 function ensurePlan(){
- const t=today(),g=S.st.goal;if(S.plan.day!==t)S.plan={day:t,ids:[]};
- const ids=S.plan.ids,done=ids.filter(isNewDone),pend=ids.filter(i=>!isNewDone(i));
- let keep=done.concat(pend.slice(0,Math.max(0,g-done.length)));
- if(keep.length<g){const used=new Set(keep);const main=[],spec=[];
-  for(const i of S.items){if(P(i.id)?.first||used.has(i.id)||!inScope(i))continue;(i.type==='word'||i.type==='phrase'?main:spec).push(i.id)}
-  let m=0,s=0;for(let j=keep.length;j<g;j++){const wantSpec=j%4===3;let id;
-   if(wantSpec&&s<spec.length)id=spec[s++];else if(m<main.length)id=main[m++];else if(s<spec.length)id=spec[s++];else break;keep.push(id)}}
- if(keep.length!==ids.length||keep.some((v,i)=>v!==ids[i])){S.plan.ids=keep;saveKV('plan',S.plan)}
- return S.plan.ids}
+ const t=today(),g=S.st.goal;
+ if(S.plan.day!==t)S.plan={day:t,ids:[],version:2};
+ const old=S.plan.ids,done=old.filter(id=>S.byId.has(id)&&isNewDone(id));
+ let keep=S.plan.version===2?old.filter(id=>S.byId.has(id)&&(isNewDone(id)||(!P(id)?.first&&inScope(S.byId.get(id))))):done.slice();
+ keep=keep.filter((id,i)=>keep.indexOf(id)===i);
+ if(keep.length>g)keep=done.concat(keep.filter(id=>!isNewDone(id)).slice(0,Math.max(0,g-done.length)));
+ // Failed recall from yesterday takes priority over the normal group quotas.
+ if(!keep.length){const urgent=shuf(S.items.filter(it=>!P(it.id)?.first&&P(it.id)?.pending&&P(it.id).due<=t&&inScope(it)).map(it=>it.id));keep=urgent.slice(0,g)}
+ const used=new Set(keep),pools={own:[],base:[],expr:[]};
+ for(const it of S.items)if(!P(it.id)?.first&&!used.has(it.id)&&inScope(it))pools[wordBucket(it)].push(it.id);
+ for(const k of Object.keys(pools))pools[k]=shuf(pools[k]).sort((a,b)=>(P(b)?.pending?1:0)-(P(a)?.pending?1:0));
+ const target={own:Math.round(g*.5),expr:Math.round(g*.2)};target.base=g-target.own-target.expr;
+ const count={own:0,base:0,expr:0};keep.forEach(id=>count[wordBucket(S.byId.get(id))]++);
+ const added=[];
+ for(const k of ['own','base','expr'])while(count[k]<target[k]&&pools[k].length&&keep.length+added.length<g){added.push(pools[k].shift());count[k]++}
+ while(keep.length+added.length<g){const k=['own','base','expr'].filter(k=>pools[k].length).sort((a,b)=>count[a]-count[b])[0];if(!k)break;added.push(pools[k].shift());count[k]++}
+ keep=keep.concat(shuf(added));S.plan.version=2;
+ if(keep.length!==old.length||keep.some((id,i)=>id!==old[i])||S.plan.mixed!==true){S.plan.ids=keep;S.plan.mixed=true;saveKV('plan',S.plan)}
+ return S.plan.ids;
+}
+function learningQueue(ids,reviews=[]){
+ const q=reviews.slice(0,5),rest=reviews.slice(5),batches=Math.ceil(ids.length/4);
+ for(let i=0;i<ids.length;i+=4){const batch=ids.slice(i,i+4),n=i/4+1;
+  q.push(...batch.map(id=>({id,k:'new',batch:n,batches})),...shuf(batch).map(id=>({id,k:'q0'})),...shuf(batch).map(id=>({id,k:'q1'})),...rest.splice(0,3));
+ }
+ return q.concat(rest);
+}
 const dueList=()=>{const t=today();return[...S.prog.values()].filter(p=>p.first&&p.stage<7&&p.due<=t)};
 const mistakes=()=>[...S.prog.values()].filter(p=>p.bad>0).sort((a,b)=>b.bad/(b.ok+b.bad)-a.bad/(a.ok+a.bad)||b.bad-a.bad);
 const streakNow=()=>{const s=S.streak,t=today();return s.last>=t-1||(s.last===t-2&&s.fz>0)?s.n:0};
@@ -97,11 +116,14 @@ function grade(e,g){const Q=S.Q,t=today(),ok=g>0,p=P(e.id)||newP(e.id),L=logOf(t
  const mode=e.k==='mat'?'mat':Q.practice||e.k==='prac'?'prac':e.r?'retry':e.k;
  ok?(p.ok++,L.ok++,Q.ok++):(p.bad++,L.bad++,Q.bad++);p.last=t;
  if(mode==='rev'){L.rv++;Q.rv++}
- if(mode!=='prac'&&mode!=='mat'){
+ if((e.k==='q1'||e.k==='q0')&&!p.first){p.pending=true;p.due=t+1}
+ if(e.k==='q1'&&ok&&!e.hinted&&!p.first){p.first=t;p.pending=false;L.nw++;Q.nw++}
+ if(mode!=='prac'&&mode!=='mat'&&e.k!=='q0'&&(!e.hinted||!ok)){
   if(mode==='retry'){if(ok){if(!p.stage)p.stage=1;p.due=t+1}else p.due=t}
   else if(ok){p.stage=Math.min(7,p.stage+(g===3?2:(g===1&&p.stage)?0:1));p.due=p.stage>=7?1e9:t+(g===1?1:INT[p.stage])}
   else{p.lapses++;p.stage=p.stage?Math.max(1,p.stage-2):0;p.due=t}}
- if(!ok&&mode!=='mat'&&!e.r)Q.queue.splice(Math.min(3,Q.queue.length),0,{id:e.id,k:e.k,r:true});
+ if(ok&&e.k==='q1'&&e.hinted)Q.queue.splice(Math.min(3,Q.queue.length),0,{id:e.id,k:'q1',r:true});
+ if(!ok&&mode!=='mat'&&(!e.r||(e.k==='q1'&&(e.attempt||0)<2)))Q.queue.splice(Math.min(3,Q.queue.length),0,{id:e.id,k:e.k,r:true,attempt:(e.attempt||0)+1});
  if(!e.r&&mode!=='mat'&&e.k!=='new')Q.done++;
  saveP(p);saveL(L);if(mode!=='prac'&&mode!=='mat'&&checkStreak())Q.streakUp=true}
 
@@ -123,7 +145,7 @@ function buildEx(e){
  if(arrow(it)){W.wf=5;if(!easy)W.card=1}
  else{W.mc=st<=1||easy?4:2;W.mc2=easy?1:st>=2?3:2;if(typable(it)&&!easy&&st>=2)W.type=st>=4?4:2;if(cz)W.cloze=3;
   if(it.type==='antonym_pair'&&it.antonym)W.anto=3;if(it.type==='formal_informal'&&it.informal)W.formal=3;if(!easy)W.card=1}
- let bag=[];for(const k in W)for(let i=0;i<W[k];i++)bag.push(k);let kind=pick(bag);
+ let bag=[];for(const k in W)for(let i=0;i<W[k];i++)bag.push(k);let kind=e.k==='q0'?(arrow(it)?'wf':'mc'):e.k==='q1'?(arrow(it)?'wf':typable(it)?'type':'mc2'):pick(bag);
  const mc=(label,prompt,ans,ds,sub)=>{if(ds.length<2)return{kind:'card',it};const opts=shuf([ans,...ds]);return{kind:'mc',it,label,prompt,sub,opts,ci:opts.indexOf(ans)}};
  switch(kind){
   case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[it.rule,it.uk].filter(Boolean).join(' · '),ans:variants(it)};
@@ -138,11 +160,10 @@ function buildEx(e){
 /* ---------- сессия ---------- */
 function startSession(mode,o={}){
  let q=[],practice=false;
- if(mode==='day'||mode==='review'){
+ if(mode==='day'||mode==='review'||mode==='custom'){
   const rev=shuf(dueList().sort((a,b)=>a.due-b.due).slice(0,50)).map(p=>({id:p.id,k:'rev'}));
-  const nw=mode==='day'?ensurePlan().filter(id=>!isNewDone(id)).map(id=>({id,k:'new'})):[];
-  const step=Math.ceil((rev.length+1)/(nw.length+1));let ri=0;
-  nw.forEach((n,i)=>{const u=Math.min(rev.length,(i+1)*step);while(ri<u)q.push(rev[ri++]);q.push(n)});q.push(...rev.slice(ri));
+  if(mode==='review')q=rev;
+  else{const ids=mode==='custom'?shuf(S.custom.filter(i=>!P(i.id)?.first).map(i=>i.id)).slice(0,S.st.goal):ensurePlan().filter(id=>!isNewDone(id));q=learningQueue(ids,mode==='custom'?[]:rev)}
   if(!q.length)return startSession('free',o)}
  else{practice=true;let ids;
   if(mode==='hard')ids=mistakes().slice(0,20).map(p=>p.id);
@@ -150,8 +171,8 @@ function startSession(mode,o={}){
   else{const pool=S.items.filter(i=>(!o.cat||i.category===o.cat)&&(!o.topic||(i.topics||[]).includes(o.topic))&&(!o.lvl||i.level===o.lvl)),seen=pool.filter(i=>P(i.id)?.first);ids=shuf(seen.length>=8?seen:pool).slice(0,20).map(i=>i.id)}
   q=ids.map(id=>({id,k:'prac'}));if(!q.length)return toast('Поки нічого тренувати')}
  const cand=q.filter(e=>(e.k==='rev'||e.k==='prac')).map(e=>e.id).filter(id=>{const it=S.byId.get(id);return!arrow(it)&&it.en.length<=28&&it.uk.length<=42});
- for(let i=7;i<q.length&&cand.length>=4;i+=8)q.splice(i,0,{k:'match',ids:shuf(cand).slice(0,4)});
- S.Q={active:true,mode,practice,queue:q,total:q.filter(e=>e.k!=='match').length,done:0,ok:0,bad:0,nw:0,rv:0,streakUp:false};
+ for(let i=7;i<q.length&&cand.length>=4&&mode!=='day'&&mode!=='custom';i+=8)q.splice(i,0,{k:'match',ids:shuf(cand).slice(0,4)});
+ S.Q={active:true,mode,practice,queue:q,total:q.filter(e=>e.k!=='match'&&e.k!=='new').length,done:0,ok:0,bad:0,nw:0,rv:0,streakUp:false};
  render();shell();nextQ()}
 function shell(){$('#app').innerHTML=`<div class="view in"><div class="sh"><button class="x" data-a="quit" aria-label="Закрити">✕</button><div class="bar pb"><i></i></div><small id="pc"></small></div><div id="qb"></div></div>`;$('#app').scrollTop=0}
 function updPb(){const Q=S.Q;$('.pb i').style.width=Math.min(100,Q.done/Math.max(1,Q.total)*100)+'%';$('#pc').textContent=Math.min(Q.done,Q.total)+' / '+Q.total}
@@ -166,19 +187,51 @@ function extras(it){const r=[],add=(k,v)=>{if(v&&(!Array.isArray(v)||v.length))r
  add('Синоніми',it.synonyms);add('Антонім',it.antonym&&it.antonym+(it.antonym_uk?' — '+it.antonym_uk:''));add('Informal',it.informal);add('Базове дієслово',it.base_verb);
  add('Правило',it.rule);add('Група',it.group);add('Нотатка',it.note);if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синонім для',it.synonym_of);
  return r.length?`<div class="ext">${r.join('')}</div>`:''}
-function studyV(it){return`<div class="lab">Нове</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
+function studyV(it){const e=S.Q?.cur;return`<div class="lab">Знайомство${e?.batch?` · група ${e.batch} з ${e.batches}`:''}</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
+function hintAllowance(it){
+ if(S.hints.day!==today())S.hints={day:today(),used:0};
+ return P(it.id)?.first&&P(it.id).first<today()?Infinity:Math.max(0,2-S.hints.used);
+}
+function hintControls(it){const left=hintAllowance(it);return `<div class="hint-row"><button class="btn" data-a="hintword" id="hint-btn" ${left===0?'disabled':''}>💡 Підказка${left===Infinity?'':` · ${left}/2`}</button><div id="word-hint" class="hint" role="status"></div></div>`}
+function showWordHint(){
+ const Q=S.Q,x=Q?.ex;if(!x||Q.locked||Q.cur.hinted)return;
+ const left=hintAllowance(x.it);if(!left)return toast('На сьогодні використано 2 підказки для нових слів');
+ if(left!==Infinity){S.hints.used++;saveKV('hints',S.hints)}
+ Q.cur.hinted=true;
+ const answer=x.kind==='type'?x.ans[0]:x.opts[x.ci];
+ const masked=[...answer].map((c,i)=>/[a-zа-яіїєґ]/i.test(c)&&i!==answer.search(/[a-zа-яіїєґ]/i)?'＿':c).join(' ');
+ $('#word-hint').textContent='Перша літера: '+masked;
+ $('#hint-btn').disabled=true;$('#hint-btn').textContent='💡 Підказку показано';
+}
+function spellingDiff(typed,correct){
+ const a=[...typed],b=[...correct],d=Array.from({length:a.length+1},()=>Array(b.length+1).fill(0));
+ for(let i=0;i<=a.length;i++)d[i][0]=i;for(let j=0;j<=b.length;j++)d[0][j]=j;
+ for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+ const mine=[],right=[];let i=a.length,j=b.length;
+ const mark=c=>'<mark>'+esc(c)+'</mark>',gap='<mark class="spell-gap" aria-label="Пропущена літера">·</mark>';
+ while(i||j){
+  if(i&&j&&d[i][j]===d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)){const same=a[i-1]===b[j-1];mine.push(same?esc(a[i-1]):mark(a[i-1]));right.push(same?esc(b[j-1]):mark(b[j-1]));i--;j--}
+  else if(i&&d[i][j]===d[i-1][j]+1){mine.push(mark(a[--i]));right.push(gap)}
+  else{mine.push(gap);right.push(mark(b[--j]))}
+ }
+ return{distance:d[a.length][b.length],mine:mine.reverse().join(''),right:right.reverse().join('')};
+}
+function spellingFeedback(input,answers){
+ const typed=norm(input),best=answers.map(a=>spellingDiff(typed,a)).sort((a,b)=>a.distance-b.distance)[0];
+ return `<div class="spelling"><div><small>Твій варіант</small><div>${best.mine}</div></div><div><small>Правильно</small><div>${best.right}</div></div></div>`;
+}
 function exV(x){const it=x.it;
  if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
- if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div><div id="fb"></div>`;
- return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div><div id="fb"></div>`}
+ if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div>${hintControls(it)}<div id="fb"></div>`;
+ return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div>${hintControls(it)}<div id="fb"></div>`}
 function matchV(e){const its=e.ids.map(id=>S.byId.get(id));e.bad=new Set();e.left=null;e.n=0;
  return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(i.uk)}</span></button>`).join('')}</div></div><div id="fb"></div>`}
 function resolve(ok,g){const Q=S.Q;if(Q.locked)return;Q.locked=true;const e=Q.cur,it=S.byId.get(e.id);
  logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(e,g);hap();if(S.st.sound)say(it);updPb();
- $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
+ $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${Q.ex?.comparison||''}${e.hinted?'<p class="hint">Відповідь із підказкою</p>':''}${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
  const c=$('.qcard');if(c){c.classList.add(ok?'pop':'shake')}if(ok&&(it.custom||!it.example))Q.tm=setTimeout(nextQ,950);
  $('#fb').scrollIntoView({block:'nearest',behavior:'smooth'})}
-function checkType(giveUp){const Q=S.Q;if(Q.locked)return;const inp=$('#ti'),ok=!giveUp&&Q.ex.ans.includes(norm(inp.value));if(!giveUp&&!inp.value.trim())return;inp.classList.add(ok?'ok':'no');inp.blur();resolve(ok,ok?2:0)}
+function checkType(giveUp){const Q=S.Q;if(Q.locked)return;const inp=$('#ti'),ok=!giveUp&&Q.ex.ans.includes(norm(inp.value));if(!giveUp&&!inp.value.trim())return;Q.ex.comparison=!ok&&!giveUp?spellingFeedback(inp.value,Q.ex.ans):'';inp.classList.add(ok?'ok':'no');inp.blur();resolve(ok,ok?2:0)}
 function finish(){const Q=S.Q,t=today(),L=S.logs.get(t)||{};Q.queue=[];Q.cur=null;checkStreak();const acc=Q.ok+Q.bad?Math.round(Q.ok/(Q.ok+Q.bad)*100):0,sn=streakNow();
  $('#app').innerHTML=`<div class="view in sum"><h1>${acc>=70?'Чудово! 🎉':'Готово 👏'}</h1><p class="hint">${Q.practice?'Тренування завершено':S.plan.ids.every(isNewDone)?'Мету дня виконано':'Сесію завершено'}</p><div class="grid"><div class="glass tile"><b>${Q.nw}</b><span>Нових</span></div><div class="glass tile"><b>${Q.rv}</b><span>Повторив</span></div><div class="glass tile"><b>${acc}%</b><span>Точність</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>${pl(sn,['день','дні','днів'])} поспіль</span></div></div><div class="stack"><button class="btn pri big" data-a="quit">Продовжити навчання завтра</button><button class="btn" data-a="more">Повторити ще</button></div></div>`;
  if(acc>=70||Q.streakUp)confetti();hap()}
@@ -201,9 +254,9 @@ function home(){const t=today(),ids=ensurePlan(),done=ids.filter(isNewDone).leng
  <div class="grid"><div class="glass tile"><b>${L.nw}</b><span>Нові сьогодні</span></div><div class="glass tile"><b>${due}</b><span>На повторення</span></div><div class="glass tile"><b>${c.learned}</b><span>Вивчено всього</span></div><div class="glass tile"><b>${c.acc}%</b><span>Точність</span></div></div>
  <div class="glass tile" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Серія: <b style="display:inline">${sn} ${pl(sn,['день','дні','днів'])}</b></span><span>❄️ заморозки: ${S.streak.fz||0}</span></div><div class="bar"><i style="width:${(sn%7)/7*100}%"></i></div><span style="font-size:12px">Кожні 7 днів серії — одна заморозка на пропущений день</span></div>`}
 const sel=(id,v,opts,ph)=>`<select id="${id}" aria-label="${ph}"><option value="">${ph}</option>${opts.map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
-function learn(){const due=dueList().length,left=ensurePlan().filter(id=>!isNewDone(id)).length,mk=mistakes().length,fv=[...S.prog.values()].filter(p=>p.fav).length,F=S.F;
+function learn(){const own=S.custom.filter(i=>!P(i.id)?.first).length,due=dueList().length,left=ensurePlan().filter(id=>!isNewDone(id)).length,mk=mistakes().length,fv=[...S.prog.values()].filter(p=>p.fav).length,F=S.F;
  const row=(m,t,s,dis)=>`<button class="glass row" ${dis?'disabled style="opacity:.45"':`data-a="start" data-m="${m}"`}><div><b>${t}</b><span>${s}</span></div><em>›</em></button>`;
- return`<div class="top"><h1>Вчити</h1></div>${row('day','План на сьогодні',`${left} нових · ${due} повторень`,!left&&!due)}${row('review','Лише повторення',due+' на сьогодні',!due)}${row('hard','Складні слова',mk+' у списку помилок',!mk)}${row('fav','Обране',fv+' слів',!fv)}
+ return`<div class="top"><h1>Вчити</h1></div><p class="hint">Змішаний план: твої слова, слова з бази та вирази. Знайомство по 4 слова, потім перевірка.</p>${row('day','План на сьогодні',`${left} нових · ${due} повторень`,!left&&!due)}${row('custom','Вивчити додані',own+' нових у черзі',!own)}${row('review','Лише повторення',due+' на сьогодні',!due)}${row('hard','Складні слова',mk+' у списку помилок',!mk)}${row('fav','Обране',fv+' слів',!fv)}
  <div class="lab">Вільне тренування (20 завдань)</div><div class="sel" id="fsel">${sel('fc',F.cat,CATS,'Категорія')}${sel('ft',F.topic,S.topics,'Тема')}${sel('fl',F.lvl,['A1-A2','B1-B2'],'Рівень')}</div><button class="btn" data-a="start" data-m="free">Почати тренування</button>`}
 function bars(a,mx){const n=a.length,w=300/n,M=mx||Math.max(1,...a.map(x=>x.v+(x.v2||0)));
  return`<svg class="ch" viewBox="0 0 300 118"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--a)"/><stop offset="1" stop-color="var(--b)"/></linearGradient></defs>${a.map((x,i)=>{const h1=x.v/M*84,h2=(x.v2||0)/M*84,bx=i*w+w*.17,bw=w*.66,r=Math.min(5,bw/2);
@@ -392,7 +445,7 @@ async function addGo(){
   const it={id:Math.max(100000,...S.custom.map(x=>x.id),...deletedWords.map(x=>x.item.id))+1,en,uk,...metadata,example:null,custom:true};
   if(it.type==='phrasal_verb')it.base_verb=en.split(' ')[0];
   S.custom.push(it);saveKV('custom',S.custom);indexItem(it);S.items.unshift(it);
-  ensurePlan();if(!S.plan.ids.includes(it.id)){S.plan.ids.unshift(it.id);ensurePlan()}
+  // New additions stay in the queue without replacing today's selected words.
   render();openDetail(it.id);toast('Слово додано ✓');enrichAddedWord(it,dictionary);
  }finally{if(tok===S.addTok){S.adding=false;const b=$('#adb');if(b)b.disabled=false;const i=$('#ae');if(i)i.disabled=false}}}
 function indexItem(i){S.byId.set(i.id,i);(i.topics||[]).forEach(t=>{if(!S.topics.includes(t)){S.topics.push(t);S.topics.sort()}});i._s=[i.en,i.uk,i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()}
@@ -405,10 +458,10 @@ const ACT={
  more(){const m=dueList().length?'review':'free';S.Q=null;startSession(m,{})},
  speak(d){say(S.byId.get(+d.id))},
  fav(d,b){const p=P(+d.id)||newP(+d.id);p.fav=!p.fav;saveP(p);b.textContent=star(+d.id);hap()},
- got(){const Q=S.Q,e=Q.cur,p=P(e.id)||newP(e.id),t=today();if(!p.first){p.first=t;p.last=t;p.due=t;logOf(t).nw++;saveL(logOf(t));Q.nw++}saveP(p);Q.queue.splice(Math.min(3,Q.queue.length),0,{id:e.id,k:'q0'});hap();nextQ()},
+ got(){hap();nextQ()},
  next(){nextQ()},
  opt(d,b){const Q=S.Q;if(Q.locked)return;const x=Q.ex,i=+d.i,ok=i===x.ci,bs=document.querySelectorAll('.opt');bs[i].classList.add(ok?'ok':'no');if(!ok)bs[x.ci].classList.add('ok');resolve(ok,ok?2:0)},
- chk(){checkType(false)},idk(){checkType(true)},
+ chk(){checkType(false)},idk(){checkType(true)},hintword(){showWordHint()},
  show(){const c=$('#cd');c.classList.add('on');hap();if(S.st.sound)say(S.Q.ex.it);$('#rt').innerHTML=`<div class="rates">${[[0,'😵 Не знаю'],[1,'😐 Важко'],[2,'🙂 Добре'],[3,'🔥 Легко']].map(([g,l])=>`<button class="btn" data-a="rate" data-g="${g}">${l}</button>`).join('')}</div>`},
  rate(d){rateCard(+d.g)},
  ml(d,b){const e=S.Q.cur;document.querySelectorAll('[data-a=ml]').forEach(x=>x.classList.remove('sel'));if(b.classList.contains('dn'))return;b.classList.add('sel');e.left=+d.id},
@@ -437,10 +490,10 @@ const ACT={
  theme(d){S.st.theme=d.v;saveSt();applyTheme();render()},
  tog(d){S.st[d.k]=!S.st[d.k];if(d.k==='reduce'&&S.st.reduce)S.st.anim=false;saveSt();applyTheme();render()},
  onbgo(){S.st.onboarded=true;saveSt();document.body.classList.remove('sess');render();startSession('day')},
- export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan,custom:S.custom}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
+ export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan,custom:S.custom,hints:S.hints}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}},
  import(){$('#imp').click()},
- async reset(){if(!confirm('Скинути весь прогрес? Налаштування й додані слова збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('custom',S.custom);saveKV('settings',S.st);saveKV('streak',S.streak);toast('Прогрес скинуто');render()}};
+ async reset(){if(!confirm('Скинути весь прогрес? Налаштування й додані слова збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('custom',S.custom);saveKV('settings',S.st);saveKV('streak',S.streak);saveKV('hints',S.hints);toast('Прогрес скинуто');render()}};
 function rateCard(g){const Q=S.Q;if(Q.locked)return;Q.locked=true;logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(Q.cur,g);hap();updPb();Q.tm=setTimeout(nextQ,260)}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&ACT[b.dataset.a])ACT[b.dataset.a](b.dataset,b,e);else if(e.target.id==='sheet')ACT.closeSheet()});
 document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn,.opt');if(!b)return;const r=b.getBoundingClientRect();b.style.setProperty('--x',e.clientX-r.left+'px');b.style.setProperty('--y',e.clientY-r.top+'px');b.classList.remove('rp');void b.offsetWidth;b.classList.add('rp')});
@@ -497,6 +550,7 @@ async function init(){
  saveKV('custom',S.custom);S.items=[...S.custom,...data.items];
  S.items.forEach(indexItem);
  (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
+ S.hints=kv.hints||{day:-1,used:0};
  S.st={...DEF,...(kv.settings||{})};S.streak=kv.streak||{n:0,best:0,last:-9,fz:0};S.plan=kv.plan||{day:-1,ids:[]};
  normalizeSavedWords();
  applyTheme();render();

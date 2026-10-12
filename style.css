@@ -86,3 +86,5 @@ input:focus,select:focus{border-color:var(--a)}select{font-size:14px;padding:0 1
 .fld:focus{border-color:var(--a)}.rw{display:flex;gap:8px;align-items:center}.rw .fld{flex:1;min-width:0}
 .am{margin:12px 2px;font-size:14px;line-height:1.45}.am.bad{color:var(--no)}.am.ok{color:var(--ok)}
 .am .ar{padding:3px 0;color:var(--ink)}.am small{color:var(--mut)}.am .chips{margin:8px 0 0}
+.hint-row{margin-top:12px}.hint-row .btn{min-height:42px;font-size:14px}.hint-row .hint:not(:empty){margin:10px 4px;line-height:1.7;overflow-wrap:anywhere}.hint-row button:disabled{opacity:.45;cursor:default}
+.spelling{display:grid;gap:10px;margin:14px 0;font-size:18px;line-height:1.55}.spelling small{display:block;color:var(--mut);font-size:12px;margin-bottom:3px}.spelling>div>div{white-space:pre-wrap;overflow-wrap:anywhere}.spelling mark{background:rgba(255,211,93,.22);color:#ffd35d;border-radius:4px;padding:1px 2px;font-weight:750}.spelling .spell-gap{border:1px dashed rgba(255,211,93,.6)}
