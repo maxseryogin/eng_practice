@@ -15,7 +15,7 @@ const dstr=d=>new Date(d*864e5).toISOString().slice(0,10);
 const shuf=a=>{a=a.slice();for(let i=a.length;i>1;){const j=Math.random()*i--|0;[a[i],a[j]]=[a[j],a[i]]}return a};
 const pl=(n,w)=>w[n%10===1&&n%100!==11?0:n%10>=2&&n%10<=4&&(n%100<10||n%100>=20)?1:2];
 const CATS=['Vocabulary','Idioms','Collocations','Verb + preposition','Phrasal verbs','Synonyms','Antonyms','Word formation','Formal vs informal'];
-const DEF={goal:8,level:'both',cats:null,sound:true,haptic:true,theme:'dark',anim:true,reduce:false,onboarded:false};
+const DEF={goal:8,level:'both',cats:null,sound:true,haptic:true,theme:'dark',lang:'uk',anim:true,reduce:false,onboarded:false};
 const S={items:[],byId:new Map(),prog:new Map(),logs:new Map(),st:{},streak:{},plan:{day:-1,ids:[]},tab:'home',W:{seg:'all',q:'',cat:'',topic:'',lvl:'',n:60},F:{cat:'',topic:'',lvl:''},range:7,cl:'',Q:null,topics:[],custom:[],hints:{day:-1,used:0}};
 
 /* ---------- IndexedDB ---------- */
@@ -72,6 +72,47 @@ function undoWords(){
 }
 function applyTheme(){const th=S.st.theme,dk=th==='dark'||(th==='auto'&&matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.dataset.theme=dk?'dark':'light';document.documentElement.classList.toggle('calm',S.st.reduce||!S.st.anim);$('meta[name=theme-color]').content=dk?'#05070f':'#eef1fb'}
 
+function wordTranslation(it){return S.st.lang==='ru'?(russianWords.get(it.id)?.['русский']||it.ru||it.uk):it.uk}
+function translatedExtra(it,key){const fields={antonym_uk:'перевод_антонима',note:'примечание',rule:'правило',group:'группа'};return S.st.lang==='ru'?(russianWords.get(it.id)?.[fields[key]]||it[key]):it[key]}
+async function translateCustomWords(){
+ if(S.st.lang!=='ru')return;
+ for(const it of S.custom){if(it.ru)continue;const r=await tr(it.en,'en','ru');if(r&&S.byId.get(it.id)===it){it.ru=cleanTranslation(r.list[0]);indexItem(it);saveKV('custom',S.custom);if(S.st.lang==='ru'&&$('#sheet').classList.contains('open')&&+$('#sheet [data-a="speak"]')?.dataset.id===it.id)openDetail(it.id)}}
+ if(!S.Q?.active)render();
+}
+const SESSION_KEY='nmt-daily-session-v1';
+let pausedDay=null;
+function clearDailySession(){pausedDay=null;try{localStorage.removeItem(SESSION_KEY)}catch(e){}saveKV('dailySession',null)}
+function readDailySession(fallback){
+ let saved;try{saved=JSON.parse(localStorage.getItem(SESSION_KEY)||'null')}catch(e){}
+ saved=saved||fallback;
+ if(!saved||saved.day!==today()||saved.q?.mode!=='day'||!Array.isArray(saved.q.queue))return null;
+ const ids=[saved.q.cur,...saved.q.queue].filter(Boolean).flatMap(e=>e.ids||[e.id]);
+ if(ids.some(id=>!S.byId.has(id)))return null;
+ return saved;
+}
+function saveDailySession(){
+ const Q=S.Q;if(!Q?.active||Q.mode!=='day'||!Q.cur)return;
+ const q={...Q,tm:undefined,qs:undefined};
+ if(q.cur.bad instanceof Set)q.cur={...q.cur,bad:[...q.cur.bad]};
+ const saved={day:today(),lang:S.st.lang,q,html:$('#qb')?.innerHTML||'',input:$('#ti')?.value||''};
+ pausedDay=JSON.parse(JSON.stringify(saved));
+ try{localStorage.setItem(SESSION_KEY,JSON.stringify(pausedDay))}catch(e){}
+ saveKV('dailySession',pausedDay);
+}
+function resumeDailySession(){
+ const saved=readDailySession(pausedDay);if(!saved)return false;
+ S.Q={...saved.q,active:true,qs:Date.now()};const Q=S.Q;
+ if(Q.cur?.bad)Q.cur.bad=new Set(Q.cur.bad);
+ if(Q.ex)Q.ex.it=S.byId.get(Q.ex.it.id);
+ render();shell();
+ if(saved.lang===S.st.lang){$('#qb').innerHTML=saved.html;if($('#ti'))$('#ti').value=saved.input;updPb();if(Q.locked&&!$('#fb .btn'))Q.tm=setTimeout(nextQ,300)}
+ else{if(Q.locked)nextQ();else{Q.queue.unshift(Q.cur);nextQ()}}
+ localizeUI();return true;
+}
+function dailyResumeLabel(){const saved=readDailySession(pausedDay);return saved?' · '+saved.q.done+' / '+saved.q.total:''}
+window.addEventListener('pagehide',saveDailySession);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)saveDailySession()});
+document.addEventListener('input',e=>{if(e.target.id==='ti')saveDailySession()});
 /* ---------- планирование дня ---------- */
 const inScope=i=>(!S.st.cats||S.st.cats.includes(i.category))&&(S.st.level==='both'||!i.level||i.level===S.st.level);
 const wordBucket=i=>i.category==='Vocabulary'?(i.custom?'own':'base'):'expr';
@@ -129,10 +170,10 @@ function grade(e,g){const Q=S.Q,t=today(),ok=g>0,p=P(e.id)||newP(e.id),L=logOf(t
 
 /* ---------- генерация упражнений ---------- */
 function distract(it,field,n=3){
- const key=fam(it),tp=new Set(it.topics||[]),mine=String(it[field]||'');const seen=new Set([norm(mine)]);
+ const key=fam(it),tp=new Set(it.topics||[]),mine=String(field==='uk'?wordTranslation(it):it[field]||'');const seen=new Set([norm(mine)]);
  const sc=S.items.filter(o=>o.id!==it.id&&fam(o)===key&&!arrow(o)&&o[field]).map(o=>{const c=(o.topics||[]).filter(x=>tp.has(x)).length;
   return[o,c*3+(o.level&&o.level===it.level?2:0)+(o.pos&&o.pos===it.pos?1:0)-Math.abs(String(o[field]).length-mine.length)/25+Math.random()*2]}).sort((a,b)=>b[1]-a[1]);
- const out=[];for(const[o]of sc){const v=strip(o[field]),k=norm(v);if(seen.has(k))continue;seen.add(k);out.push(v);if(out.length>=n)break}return out}
+ const out=[];for(const[o]of sc){const v=strip(field==='uk'?wordTranslation(o):o[field]),k=norm(v);if(seen.has(k))continue;seen.add(k);out.push(v);if(out.length>=n)break}return out}
 function variants(it){const raw=arrow(it)?it.en.split('→')[1]:it.en,en=strip(raw),v=new Set([en,en.replace(/\s*\([^)]*\)/g,''),en.replace(/[()]/g,'')]);
  if(en.includes('/'))en.split('/').forEach(x=>v.add(x.trim()));[...v].forEach(x=>{if(x.startsWith('to '))v.add(x.slice(3))});return[...v].map(norm).filter(Boolean)}
 const typable=it=>it.en.length<=30&&!/…|\.\.\./.test(it.en);
@@ -148,18 +189,19 @@ function buildEx(e){
  let bag=[];for(const k in W)for(let i=0;i<W[k];i++)bag.push(k);let kind=e.k==='q0'?(arrow(it)?'wf':'mc'):e.k==='q1'?(arrow(it)?'wf':typable(it)?'type':'mc2'):pick(bag);
  const mc=(label,prompt,ans,ds,sub)=>{if(ds.length<2)return{kind:'card',it};const opts=shuf([ans,...ds]);return{kind:'mc',it,label,prompt,sub,opts,ci:opts.indexOf(ans)}};
  switch(kind){
-  case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[it.rule,it.uk].filter(Boolean).join(' · '),ans:variants(it)};
-  case'type':return{kind:'type',it,label:'Напиши англійською',prompt:it.uk,ans:variants(it)};
-  case'mc2':return mc('Обери англійський варіант',it.uk,strip(it.en),distract(it,'en'));
-  case'cloze':return mc('Заповни пропуск',cz.stem,cz.b,cz.d,it.uk);
+  case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[translatedExtra(it,'rule'),wordTranslation(it)].filter(Boolean).join(' · '),ans:variants(it)};
+  case'type':return{kind:'type',it,label:'Напиши англійською',prompt:wordTranslation(it),ans:variants(it)};
+  case'mc2':return mc('Обери англійський варіант',wordTranslation(it),strip(it.en),distract(it,'en'));
+  case'cloze':return mc('Заповни пропуск',cz.stem,cz.b,cz.d,wordTranslation(it));
   case'anto':return mc('Обери антонім',strip(it.en),strip(it.antonym),distract(it,'antonym'),it.uk);
-  case'formal':return mc('Обери неформальний варіант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+it.uk);
+  case'formal':return mc('Обери неформальний варіант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+wordTranslation(it));
   case'card':return{kind:'card',it};
-  default:return mc('Обери переклад',strip(it.en),it.uk,distract(it,'uk'))}}
+  default:return mc('Обери переклад',strip(it.en),wordTranslation(it),distract(it,'uk'))}}
 
 /* ---------- сессия ---------- */
 function startSession(mode,o={}){
  let q=[],practice=false;
+ if(mode==='day'&&resumeDailySession())return;
  if(mode==='day'||mode==='review'||mode==='custom'){
   const rev=shuf(dueList().sort((a,b)=>a.due-b.due).slice(0,50)).map(p=>({id:p.id,k:'rev'}));
   if(mode==='review')q=rev;
@@ -181,13 +223,13 @@ function nextQ(){const Q=S.Q;clearTimeout(Q.tm);if(!Q||!Q.active)return;if(!Q.qu
  if(e.k==='new')h=studyV(S.byId.get(e.id));else if(e.k==='match')h=matchV(e);else{Q.ex=buildEx(e);h=exV(Q.ex)}
  $('#qb').innerHTML=`<div class="slide">${h}</div>`;updPb();$('#app').scrollTop=0;
  if(e.k==='new'&&S.st.sound)say(S.byId.get(e.id));
- if(Q.ex&&Q.ex.kind==='type')setTimeout(()=>$('#ti')&&$('#ti').focus(),380)}
+ if(Q.ex&&Q.ex.kind==='type')setTimeout(()=>$('#ti')&&$('#ti').focus(),380);saveDailySession()}
 const star=id=>P(id)?.fav?'⭐':'☆';
 function extras(it){const r=[],add=(k,v)=>{if(v&&(!Array.isArray(v)||v.length))r.push(`<div><span>${k}</span>${esc(Array.isArray(v)?v.join(', '):v)}</div>`)};
- add('Синоніми',it.synonyms);add('Антонім',it.antonym&&it.antonym+(it.antonym_uk?' — '+it.antonym_uk:''));add('Informal',it.informal);add('Базове дієслово',it.base_verb);
- add('Правило',it.rule);add('Група',it.group);add('Нотатка',it.note);if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синонім для',it.synonym_of);
+ add('Синоніми',it.synonyms);add('Антонім',it.antonym&&it.antonym+(it.antonym_uk?' — '+translatedExtra(it,'antonym_uk'):''));add('Informal',it.informal);add('Базове дієслово',it.base_verb);
+ add('Правило',translatedExtra(it,'rule'));add('Група',translatedExtra(it,'group'));add('Нотатка',translatedExtra(it,'note'));if(it.synonym_of&&typeof it.synonym_of!=='number')add('Синонім для',it.synonym_of);
  return r.length?`<div class="ext">${r.join('')}</div>`:''}
-function studyV(it){const e=S.Q?.cur;return`<div class="lab">Знайомство${e?.batch?` · група ${e.batch} з ${e.batches}`:''}</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc(meta(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
+function studyV(it){const e=S.Q?.cur;return`<div class="lab">Знайомство${e?.batch?` · група ${e.batch} з ${e.batches}`:''}</div><div class="glass study"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(wordTranslation(it))}</div><div class="meta">${esc(meta(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${it.id}" aria-label="Вимовити">🔊</button><button class="ib" data-a="fav" data-id="${it.id}" aria-label="Обране">${star(it.id)}</button></div></div><button class="btn pri big" data-a="got">Зрозуміло</button>`}
 function hintAllowance(it){
  if(S.hints.day!==today())S.hints={day:today(),used:0};
  return P(it.id)?.first&&P(it.id).first<today()?Infinity:Math.max(0,2-S.hints.used);
@@ -221,18 +263,18 @@ function spellingFeedback(input,answers){
  return `<div class="spelling"><div><small>Твій варіант</small><div>${best.mine}</div></div><div><small>Правильно</small><div>${best.right}</div></div></div>`;
 }
 function exV(x){const it=x.it;
- if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(it.uk)}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
+ if(x.kind==='card')return`<div class="lab">Картка</div><div class="flip" id="cd"><div class="fi"><div class="face f glass"><div class="en">${esc(strip(it.en))}</div><div class="meta">${esc(meta(it))}</div><button class="ib" data-a="speak" data-id="${it.id}">🔊</button></div><div class="face b glass"><div class="uk">${esc(wordTranslation(it))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}</div></div></div><div id="rt"><button class="btn" data-a="show">Показати переклад</button><p class="hint" style="text-align:center;margin-top:12px">або свайп: ← не знаю · знаю →</p></div>`;
  if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div>${hintControls(it)}<div id="fb"></div>`;
  return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div>${hintControls(it)}<div id="fb"></div>`}
 function matchV(e){const its=e.ids.map(id=>S.byId.get(id));e.bad=new Set();e.left=null;e.n=0;
- return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(i.uk)}</span></button>`).join('')}</div></div><div id="fb"></div>`}
+ return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(wordTranslation(i))}</span></button>`).join('')}</div></div><div id="fb"></div>`}
 function resolve(ok,g){const Q=S.Q;if(Q.locked)return;Q.locked=true;const e=Q.cur,it=S.byId.get(e.id);
  logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(e,g);hap();if(S.st.sound)say(it);updPb();
- $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(it.uk)}</div>${Q.ex?.comparison||''}${e.hinted?'<p class="hint">Відповідь із підказкою</p>':''}${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
+ $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(wordTranslation(it))}</div>${Q.ex?.comparison||''}${e.hinted?'<p class="hint">Відповідь із підказкою</p>':''}${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
  const c=$('.qcard');if(c){c.classList.add(ok?'pop':'shake')}if(ok&&(it.custom||!it.example))Q.tm=setTimeout(nextQ,950);
- $('#fb').scrollIntoView({block:'nearest',behavior:'smooth'})}
+ $('#fb').scrollIntoView({block:'nearest',behavior:'smooth'});saveDailySession()}
 function checkType(giveUp){const Q=S.Q;if(Q.locked)return;const inp=$('#ti'),ok=!giveUp&&Q.ex.ans.includes(norm(inp.value));if(!giveUp&&!inp.value.trim())return;Q.ex.comparison=!ok&&!giveUp?spellingFeedback(inp.value,Q.ex.ans):'';inp.classList.add(ok?'ok':'no');inp.blur();resolve(ok,ok?2:0)}
-function finish(){const Q=S.Q,t=today(),L=S.logs.get(t)||{};Q.queue=[];Q.cur=null;checkStreak();const acc=Q.ok+Q.bad?Math.round(Q.ok/(Q.ok+Q.bad)*100):0,sn=streakNow();
+function finish(){if(S.Q?.mode==='day')clearDailySession();const Q=S.Q,t=today(),L=S.logs.get(t)||{};Q.queue=[];Q.cur=null;checkStreak();const acc=Q.ok+Q.bad?Math.round(Q.ok/(Q.ok+Q.bad)*100):0,sn=streakNow();
  $('#app').innerHTML=`<div class="view in sum"><h1>${acc>=70?'Чудово! 🎉':'Готово 👏'}</h1><p class="hint">${Q.practice?'Тренування завершено':S.plan.ids.every(isNewDone)?'Мету дня виконано':'Сесію завершено'}</p><div class="grid"><div class="glass tile"><b>${Q.nw}</b><span>Нових</span></div><div class="glass tile"><b>${Q.rv}</b><span>Повторив</span></div><div class="glass tile"><b>${acc}%</b><span>Точність</span></div><div class="glass tile"><b>🔥 ${sn}</b><span>${pl(sn,['день','дні','днів'])} поспіль</span></div></div><div class="stack"><button class="btn pri big" data-a="quit">Продовжити навчання завтра</button><button class="btn" data-a="more">Повторити ще</button></div></div>`;
  if(acc>=70||Q.streakUp)confetti();hap()}
 
@@ -245,18 +287,18 @@ function render(){const Q=S.Q;document.body.classList.toggle('sess',!!(Q&&Q.acti
 function onb(){const s=S.st;$('#app').innerHTML=`<div class="view in onb"><h1>Welcome to NMT Vocabulary</h1><p>8 нових слів щодня — без зубріння.</p><div class="lab">Рівень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Обидва']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div><div class="lab">Слів на день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div><div style="height:22px"></div><button class="btn pri big" data-a="onbgo">Почати навчання</button></div>`}
 const counts=()=>{let learned=0,intro=0,ok=0,bad=0;S.prog.forEach(p=>{if(p.first)intro++;if(p.stage>=7)learned++});S.logs.forEach(l=>{ok+=l.ok;bad+=l.bad});return{learned,intro,ok,bad,acc:ok+bad?Math.round(ok/(ok+bad)*100):0}};
 function home(){const t=today(),ids=ensurePlan(),done=ids.filter(isNewDone).length,left=ids.length-done,due=dueList().length,sn=streakNow(),L=S.logs.get(t)||{ok:0,bad:0,nw:0,rv:0},c=counts();
- const h=new Date().getHours(),g=h<5?'Доброї ночі':h<12?'Доброго ранку':h<18?'Добрий день':'Добрий вечір',frac=ids.length?done/ids.length:1,R=57,C=2*Math.PI*R,all=left===0&&due===0;
+ const h=new Date().getHours(),g=h<5?'Доброї ночі':h<12?'Доброго ранку':h<18?'Добрий день':'Добрий вечір',frac=ids.length?done/ids.length:1,R=57,C=2*Math.PI*R,all=left===0&&due===0&&!dailyResumeLabel();
  return`<div class="top"><div><div class="app-n">NMT Vocabulary</div><h1>${g} 👋</h1></div><span class="pill hot"><span class="fl">🔥</span><b>${sn}</b></span></div>
  <div class="glass hero"><div class="ring"><svg width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="rg"><stop offset="0" stop-color="#6ee7d8"/><stop offset="1" stop-color="#8f86ff"/></linearGradient></defs><circle class="t" cx="64" cy="64" r="${R}"/><circle class="p" cx="64" cy="64" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-to="${C*(1-frac)}"/></svg><div>${done}<small>з ${ids.length}</small></div></div>
  <div class="hs"><div class="big">${left}</div><div>${pl(left,['нове','нові','нових'])} сьогодні</div><div class="big" style="font-size:28px">${due}</div><div style="margin:3px 0 0">на повторення</div></div></div>
  ${all?`<div class="glass done"><h2>Ти все зробив на сьогодні 🎉</h2><p>Можна повторити складне або потренуватися вільно.</p></div><div class="two stack"><button class="btn" data-a="start" data-m="hard">Складні</button><button class="btn" data-a="start" data-m="free">Вільна</button></div>`
- :`<div class="stack"><button class="btn pri big" data-a="start" data-m="day">${done>0||L.ok+L.bad>0?'Продовжити навчання':'Почати навчання'}</button>${left===0?'':due?`<button class="btn" data-a="start" data-m="review">Лише повторення · ${due}</button>`:''}</div>`}
+ :`<div class="stack"><button class="btn pri big" data-a="start" data-m="day">${done>0||L.ok+L.bad>0||dailyResumeLabel()?'Продовжити навчання':'Почати навчання'}${dailyResumeLabel()}</button>${left===0?'':due?`<button class="btn" data-a="start" data-m="review">Лише повторення · ${due}</button>`:''}</div>`}
  <div class="grid"><div class="glass tile"><b>${L.nw}</b><span>Нові сьогодні</span></div><div class="glass tile"><b>${due}</b><span>На повторення</span></div><div class="glass tile"><b>${c.learned}</b><span>Вивчено всього</span></div><div class="glass tile"><b>${c.acc}%</b><span>Точність</span></div></div>
  <div class="glass tile" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Серія: <b style="display:inline">${sn} ${pl(sn,['день','дні','днів'])}</b></span><span>❄️ заморозки: ${S.streak.fz||0}</span></div><div class="bar"><i style="width:${(sn%7)/7*100}%"></i></div><span style="font-size:12px">Кожні 7 днів серії — одна заморозка на пропущений день</span></div>`}
-const sel=(id,v,opts,ph)=>`<select id="${id}" aria-label="${ph}"><option value="">${ph}</option>${opts.map(o=>`<option ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+const sel=(id,v,opts,ph)=>`<select id="${id}" aria-label="${ph}"><option value="">${ph}</option>${opts.map(o=>`<option value="${esc(o)}" ${o===v?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
 function learn(){const own=S.custom.filter(i=>!P(i.id)?.first).length,due=dueList().length,left=ensurePlan().filter(id=>!isNewDone(id)).length,mk=mistakes().length,fv=[...S.prog.values()].filter(p=>p.fav).length,F=S.F;
  const row=(m,t,s,dis)=>`<button class="glass row" ${dis?'disabled style="opacity:.45"':`data-a="start" data-m="${m}"`}><div><b>${t}</b><span>${s}</span></div><em>›</em></button>`;
- return`<div class="top"><h1>Вчити</h1></div><p class="hint">Змішаний план: твої слова, слова з бази та вирази. Знайомство по 4 слова, потім перевірка.</p>${row('day','План на сьогодні',`${left} нових · ${due} повторень`,!left&&!due)}${row('custom','Вивчити додані',own+' нових у черзі',!own)}${row('review','Лише повторення',due+' на сьогодні',!due)}${row('hard','Складні слова',mk+' у списку помилок',!mk)}${row('fav','Обране',fv+' слів',!fv)}
+ return`<div class="top"><h1>Вчити</h1></div><p class="hint">Змішаний план: твої слова, слова з бази та вирази. Знайомство по 4 слова, потім перевірка.</p>${row('day','План на сьогодні',`${left} нових · ${due} повторень${dailyResumeLabel()}`,!left&&!due&&!dailyResumeLabel())}${row('custom','Вивчити додані',own+' нових у черзі',!own)}${row('review','Лише повторення',due+' на сьогодні',!due)}${row('hard','Складні слова',mk+' у списку помилок',!mk)}${row('fav','Обране',fv+' слів',!fv)}
  <div class="lab">Вільне тренування (20 завдань)</div><div class="sel" id="fsel">${sel('fc',F.cat,CATS,'Категорія')}${sel('ft',F.topic,S.topics,'Тема')}${sel('fl',F.lvl,['A1-A2','B1-B2'],'Рівень')}</div><button class="btn" data-a="start" data-m="free">Почати тренування</button>`}
 function bars(a,mx){const n=a.length,w=300/n,M=mx||Math.max(1,...a.map(x=>x.v+(x.v2||0)));
  return`<svg class="ch" viewBox="0 0 300 118"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--a)"/><stop offset="1" stop-color="var(--b)"/></linearGradient></defs>${a.map((x,i)=>{const h1=x.v/M*84,h2=(x.v2||0)/M*84,bx=i*w+w*.17,bw=w*.66,r=Math.min(5,bw/2);
@@ -283,12 +325,12 @@ function wlist(){const W=S.W,q=W.q.trim().toLowerCase();let list=S.items;
  list=list.filter(i=>(!W.cat||i.category===W.cat)&&(!W.topic||(i.topics||[]).includes(W.topic))&&(!W.lvl||i.level===W.lvl)&&(!q||i._s.includes(q)));
  if(!list.length)return`<p class="hint" style="text-align:center;padding:30px 0">${W.seg==='fav'?'Натисни ☆ на картці слова, щоб зберегти його сюди':W.seg==='my'?'Ти ще не додав власних слів':W.seg==='err'?'Помилок поки немає — чудово!':'Нічого не знайдено'}</p>`;
  const part=list.slice(0,W.n);return part.map(i=>{const p=P(i.id),pc=p&&p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100):null;
-  return`<button class="glass row" data-a="open" data-id="${i.id}"><div><b>${esc(strip(i.en))}</b><span>${esc(i.uk)}</span></div><em>${W.seg==='err'&&pc!==null?`<span class="mark${pc>=70?' g':''}">${pc}%</span><br>`:''}${esc([i.level,(i.topics||[])[0]].filter(Boolean).join(' · '))}${p&&p.fav?' ⭐':''}</em></button>`}).join('')+(list.length>W.n?`<button class="btn" data-a="moreW">Показати ще (${list.length-W.n})</button>`:'')}
+  return`<button class="glass row" data-a="open" data-id="${i.id}"><div><b>${esc(strip(i.en))}</b><span>${esc(wordTranslation(i))}</span></div><em>${W.seg==='err'&&pc!==null?`<span class="mark${pc>=70?' g':''}">${pc}%</span><br>`:''}${esc([i.level,(i.topics||[])[0]].filter(Boolean).join(' · '))}${p&&p.fav?' ⭐':''}</em></button>`}).join('')+(list.length>W.n?`<button class="btn" data-a="moreW">Показати ще (${list.length-W.n})</button>`:'')}
 function fillList(){$('#wl').innerHTML=wlist()}
 function bindWords(){fillList();let t;$('#wq').oninput=e=>{clearTimeout(t);t=setTimeout(()=>{S.W.q=e.target.value;S.W.n=60;fillList()},140)};
  [['wc','cat'],['wt','topic'],['wl2','lvl']].forEach(([id,k])=>{$('#'+id).onchange=e=>{S.W[k]=e.target.value;S.W.n=60;fillList()}})}
 function settings(){const s=S.st,tg=(k,l)=>`<div class="sr"><span>${l}</span><button class="sw ${s[k]?'on':''}" data-a="tog" data-k="${k}" role="switch" aria-checked="${!!s[k]}" aria-label="${l}"></button></div>`,cats=s.cats||CATS;
- return`<div class="top"><h1>Налаштування</h1></div><div class="lab">Слів на день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div>
+ return`<div class="top"><h1>Налаштування</h1></div><div class="lab">Мова</div><div class="seg"><button data-a="lang" data-v="uk" class="${s.lang==='uk'?'on':''}">Українська</button><button data-a="lang" data-v="ru" class="${s.lang==='ru'?'on':''}">Русский</button></div><div class="lab">Слів на день</div><div class="seg">${[5,8,10,15].map(n=>`<button class="${s.goal===n?'on':''}" data-a="goal" data-v="${n}">${n}</button>`).join('')}</div>
  <div class="lab">Рівень</div><div class="seg">${[['A1-A2','A1-A2'],['B1-B2','B1-B2'],['both','Обидва']].map(([v,l])=>`<button class="${s.level===v?'on':''}" data-a="lvl" data-v="${v}">${l}</button>`).join('')}</div>
  <div class="lab">Теми й категорії для нових слів</div><div class="chips">${CATS.map(c=>`<button class="chip ${cats.includes(c)?'on':''}" data-a="cat" data-c="${esc(c)}">${c}</button>`).join('')}</div>
  <div class="lab">Оформлення</div><div class="seg">${[['dark','Темна'],['light','Світла'],['auto','Авто']].map(([v,l])=>`<button class="${s.theme===v?'on':''}" data-a="theme" data-v="${v}">${l}</button>`).join('')}</div>
@@ -297,7 +339,7 @@ function settings(){const s=S.st,tg=(k,l)=>`<div class="sr"><span>${l}</span><bu
  <p class="hint" style="text-align:center">NMT Vocabulary · ${S.items.length} елементів · усе зберігається лише на цьому пристрої</p>`}
 function openDetail(id){const it=S.byId.get(id),p=P(id)||{stage:0,ok:0,bad:0,due:0,first:0},t=today();
  const nx=!p.first?'—':p.stage>=7?'вивчено':p.due<=t?'сьогодні':'за '+(p.due-t)+' дн.';
- $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(it.uk)}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступінь ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% вірно':'ще не відповідав'}</span></div></div>${it.custom?`<button class="btn" style="color:var(--no);margin-bottom:10px" data-a="delw" data-id="${id}">Видалити слово</button>`:''}<button class="btn" data-a="closeSheet">Закрити</button></div>`;
+ $('#sheet').innerHTML=`<div class="glass"><div class="study" style="padding:6px 0 0"><div class="en">${esc(strip(it.en))}</div><div class="uk">${esc(wordTranslation(it))}</div><div class="meta">${esc([it.category,meta(it)].filter(Boolean).join(' · '))}</div>${!it.custom&&it.example?`<p class="ex">${esc(it.example)}</p>`:''}${extras(it)}<div class="srow"><button class="ib" data-a="speak" data-id="${id}">🔊</button><button class="ib" data-a="fav" data-id="${id}">${star(id)}</button></div></div><div class="grid" style="margin:18px 0 12px"><div class="tile glass"><b style="font-size:19px">${stLabel(p.stage)}</b><span>Ступінь ${p.stage}/7 · повтор: ${nx}</span></div><div class="tile glass"><b style="font-size:19px">${p.ok} ✓ / ${p.bad} ✗</b><span>${p.ok+p.bad?Math.round(p.ok/(p.ok+p.bad)*100)+'% вірно':'ще не відповідав'}</span></div></div>${it.custom?`<button class="btn" style="color:var(--no);margin-bottom:10px" data-a="delw" data-id="${id}">Видалити слово</button>`:''}<button class="btn" data-a="closeSheet">Закрити</button></div>`;
  $('#sheet').classList.add('open')}
 function confetti(){if(S.st.reduce||!S.st.anim)return;const c=$('#fx'),x=c.getContext('2d');c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;const cs=['#6ee7d8','#8f86ff','#ffb36b','#ff6b9a','#5be3a1'],d=devicePixelRatio,
  ps=Array.from({length:130},()=>({x:innerWidth/2*d,y:innerHeight*.35*d,vx:(Math.random()-.5)*16*d,vy:(-Math.random()*14-4)*d,s:(4+Math.random()*6)*d,r:Math.random()*6,vr:(Math.random()-.5)*.4,c:pick(cs)}));let f=0;
@@ -325,7 +367,7 @@ const translationCache=new Map(),dictionaryCache=new Map();
 const cleanTranslation=s=>String(s||'').replace(/["“”„«»]/g,'').replace(/^['‘’]+|['‘’]+$/g,'').replace(/\s+/g,' ').trim();
 function tr(q,from,to){
  const key=from+'|'+to+'|'+q;if(translationCache.has(key))return translationCache.get(key);
- const valid=r=>{r.main=cleanTranslation(r.main);r.list=[...new Set(r.list.map(cleanTranslation).filter(x=>x&&x.toLowerCase()!==q.toLowerCase()&&(to!=='uk'||CYR.test(x))))];if(!r.list.length)throw Error('No translation');return r};
+ const valid=r=>{r.main=cleanTranslation(r.main);r.list=[...new Set(r.list.map(cleanTranslation).filter(x=>x&&x.toLowerCase()!==q.toLowerCase()&&(!['uk','ru'].includes(to)||CYR.test(x))))];if(!r.list.length)throw Error('No translation');return r};
  const google=tfetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&dt=bd&q=${encodeURIComponent(q)}`).then(j=>{const main=(j[0]||[]).map(x=>x[0]).join(''),alts=(j[1]||[]).flatMap(e=>e[1]||[]);return valid({main,list:[main,...alts],dict:alts.length})});
  const backup=tfetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${from}|${to}`).then(j=>{if(+j.responseStatus!==200)throw Error('Translation unavailable');const main=j.responseData?.translatedText||'',alts=(j.matches||[]).filter(m=>m.segment?.toLowerCase()===q.toLowerCase()&&+m.match>=.8).map(m=>m.translation);return valid({main,list:[main,...alts],dict:null})});
  const pending=Promise.any([google,backup]).catch(()=>{translationCache.delete(key);return null});translationCache.set(key,pending);return pending;
@@ -432,29 +474,40 @@ async function addGo(){
   if(en.length>50||!/^[a-z][a-z0-9 '’\-\/().,…]*$/i.test(en))return msg('Введи англійське слово або вираз','bad');
   en=baseWord(en);
   const existing=S.items.find(o=>bare(o.en)===bare(en));
-  if(existing){openDetail(existing.id);toast('Це слово вже є у словнику');return}
+  if(existing){
+   if(S.st.lang==='ru'&&existing.custom&&!existing.ru){
+    msg('Підбираю переклад і параметри…');const r=await tr(en,'en','ru');if(!live())return;
+    if(!r)return msg('Не вдалося отримати переклад. Спробуй ще раз','bad');
+    existing.ru=cleanTranslation(r.list[0]);indexItem(existing);saveKV('custom',S.custom);
+   }
+   openDetail(existing.id);toast('Це слово вже є у словнику');return;
+  }
   if(!navigator.onLine)return msg('Для додавання нового слова потрібен інтернет','bad');
   msg('Підбираю переклад і параметри…');
   const dictionary=wordDictionary(en);
+  // Fetch both languages concurrently so the first displayed card is already localized.
+  const russian=S.st.lang==='ru'?tr(en,'en','ru'):Promise.resolve(null);
   const fw=await tr(en,'en','uk');if(!live())return;
   if(!fw)return msg('Не вдалося отримати переклад. Спробуй ще раз','bad');
   const cands=[...new Set(fw.list.map(x=>cleanTranslation(x).toLowerCase()).filter(x=>CYR.test(x)))];
   if(!cands.length)return msg('Переклад не знайдено. Перевір написання','bad');
   if(fw.dict===0&&!en.includes(' ')&&lev(translit(cands[0]),en)<=Math.ceil(en.length*.4))return msg('Слово не знайдено. Перевір написання','bad');
   const uk=cands[0],metadata=autoWordMeta(en,uk);
-  const it={id:Math.max(100000,...S.custom.map(x=>x.id),...deletedWords.map(x=>x.item.id))+1,en,uk,...metadata,example:null,custom:true};
+  const ruResult=await russian;if(!live())return;
+  if(S.st.lang==='ru'&&!ruResult)return msg('Не вдалося отримати переклад. Спробуй ще раз','bad');
+  const it={id:Math.max(100000,...S.custom.map(x=>x.id),...deletedWords.map(x=>x.item.id))+1,en,uk,...(ruResult?{ru:cleanTranslation(ruResult.list[0])}:{}),...metadata,example:null,custom:true};
   if(it.type==='phrasal_verb')it.base_verb=en.split(' ')[0];
   S.custom.push(it);saveKV('custom',S.custom);indexItem(it);S.items.unshift(it);
   // New additions stay in the queue without replacing today's selected words.
-  render();openDetail(it.id);toast('Слово додано ✓');enrichAddedWord(it,dictionary);
+  render();openDetail(it.id);toast('Слово додано ✓');enrichAddedWord(it,dictionary);translateCustomWords();
  }finally{if(tok===S.addTok){S.adding=false;const b=$('#adb');if(b)b.disabled=false;const i=$('#ae');if(i)i.disabled=false}}}
-function indexItem(i){S.byId.set(i.id,i);(i.topics||[]).forEach(t=>{if(!S.topics.includes(t)){S.topics.push(t);S.topics.sort()}});i._s=[i.en,i.uk,i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()}
+function indexItem(i){S.byId.set(i.id,i);(i.topics||[]).forEach(t=>{if(!S.topics.includes(t)){S.topics.push(t);S.topics.sort()}});i._s=[i.en,i.uk,wordTranslation(i),i.category,(i.topics||[]).join(' ')].join(' ').toLowerCase()}
 
 /* ---------- действия ---------- */
 const ACT={
  tab(d){S.tab=d.k;render();$('#app').scrollTop=0;hap()},
  start(d){S.F={cat:$('#fc')?.value||'',topic:$('#ft')?.value||'',lvl:$('#fl')?.value||''};startSession(d.m,S.F);hap()},
- quit(){if(S.Q){clearTimeout(S.Q.tm);S.Q.active=false;S.Q=null}render()},
+ quit(){saveDailySession();if(S.Q){clearTimeout(S.Q.tm);S.Q.active=false;S.Q=null}render()},
  more(){const m=dueList().length?'review':'free';S.Q=null;startSession(m,{})},
  speak(d){say(S.byId.get(+d.id))},
  fav(d,b){const p=P(+d.id)||newP(+d.id);p.fav=!p.fav;saveP(p);b.textContent=star(+d.id);hap()},
@@ -487,14 +540,16 @@ const ACT={
  goal(d){S.st.goal=+d.v;saveSt();ensurePlan();render()},
  lvl(d){S.st.level=d.v;saveSt();ensurePlan();render()},
  cat(d){const c=new Set(S.st.cats||CATS);c.has(d.c)?c.delete(d.c):c.add(d.c);if(!c.size)return toast('Потрібна хоча б одна категорія');S.st.cats=c.size===CATS.length?null:CATS.filter(x=>c.has(x));saveSt();ensurePlan();render()},
+ lang(d){if(!['uk','ru'].includes(d.v))return;S.st.lang=d.v;locale=d.v;document.documentElement.lang=locale;saveSt();$('#sheet').innerHTML='';ACT.closeSheet();S.items.forEach(indexItem);render();localizeUI();translateCustomWords()},
  theme(d){S.st.theme=d.v;saveSt();applyTheme();render()},
  tog(d){S.st[d.k]=!S.st[d.k];if(d.k==='reduce'&&S.st.reduce)S.st.anim=false;saveSt();applyTheme();render()},
  onbgo(){S.st.onboarded=true;saveSt();document.body.classList.remove('sess');render();startSession('day')},
  export(){const data=JSON.stringify({app:'nmt-vocab',v:1,at:new Date().toISOString(),prog:[...S.prog.values()],log:[...S.logs.values()],kv:{settings:S.st,streak:S.streak,plan:S.plan,custom:S.custom,hints:S.hints}}),f=new File([data],`nmt-vocab-${dstr(today())}.json`,{type:'application/json'});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}},
  import(){$('#imp').click()},
- async reset(){if(!confirm('Скинути весь прогрес? Налаштування й додані слова збережуться.'))return;await DB.clear();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('custom',S.custom);saveKV('settings',S.st);saveKV('streak',S.streak);saveKV('hints',S.hints);toast('Прогрес скинуто');render()}};
-function rateCard(g){const Q=S.Q;if(Q.locked)return;Q.locked=true;logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(Q.cur,g);hap();updPb();Q.tm=setTimeout(nextQ,260)}
+ async reset(){if(!confirm('Скинути весь прогрес? Налаштування й додані слова збережуться.'))return;await DB.clear();clearDailySession();S.prog.clear();S.logs.clear();S.streak={n:0,best:0,last:-9,fz:0};S.plan={day:-1,ids:[]};saveKV('custom',S.custom);saveKV('settings',S.st);saveKV('streak',S.streak);saveKV('hints',S.hints);toast('Прогрес скинуто');render()}};
+function rateCard(g){const Q=S.Q;if(Q.locked)return;Q.locked=true;logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(Q.cur,g);hap();updPb();saveDailySession();Q.tm=setTimeout(nextQ,260)}
+document.addEventListener('click',()=>{if(S.Q?.mode==='day')queueMicrotask(saveDailySession)});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&ACT[b.dataset.a])ACT[b.dataset.a](b.dataset,b,e);else if(e.target.id==='sheet')ACT.closeSheet()});
 document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn,.opt');if(!b)return;const r=b.getBoundingClientRect();b.style.setProperty('--x',e.clientX-r.left+'px');b.style.setProperty('--y',e.clientY-r.top+'px');b.classList.remove('rp');void b.offsetWidth;b.classList.add('rp')});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='ti')checkType(false);else if(e.target.id==='ae'||e.target.id==='au')ACT.adgo()});
@@ -508,7 +563,7 @@ const swEnd=()=>{if(!sw)return;const{c,dx}=sw;sw=null;c.style.transition='transf
  else{c.style.transform='';if(Math.abs(dx)<8&&!c.classList.contains('on'))ACT.show()}};
 document.addEventListener('pointerup',swEnd);document.addEventListener('pointercancel',swEnd);
 async function importFile(f){if(!f)return;try{const j=JSON.parse(await f.text());if(j.app!=='nmt-vocab'||!Array.isArray(j.prog))throw 0;if(!confirm('Замінити поточний прогрес імпортованим?'))return;
- await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не вдалося прочитати файл')}}
+ clearDailySession();await DB.clear();j.prog.forEach(p=>saveP(p));(j.log||[]).forEach(l=>saveL(l));Object.entries(j.kv||{}).forEach(([k,v])=>saveKV(k,v));setTimeout(()=>location.reload(),400)}catch(e){toast('Не вдалося прочитати файл')}}
 
 /* ---------- запуск ---------- */
 function normalizeSavedWords(){
@@ -543,7 +598,8 @@ async function refreshCustomMetadata(){
 }
 async function init(){
  try{await DB.open();navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
- const data=await(await fetch('data/vocab_nmt2026.json')).json();
+ const [data,ruData]=await Promise.all(['data/vocab_nmt2026.json','data/vocab_nmt2026_ru.json'].map(async url=>{const r=await fetch(url);if(!r.ok)throw Error('Не вдалося завантажити словник');return r.json()}));
+ for(const entry of ruData['записи'])russianWords.set(entry['идентификатор'],entry);
  const kv={};(await DB.all('kv')).forEach(r=>kv[r.k]=r.v);
  S.custom=kv.custom||[];S.items=data.items;S.topics=[];
  S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null;it.uk=cleanTranslation(it.uk)});
@@ -552,8 +608,9 @@ async function init(){
  (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
  S.hints=kv.hints||{day:-1,used:0};
  S.st={...DEF,...(kv.settings||{})};S.streak=kv.streak||{n:0,best:0,last:-9,fz:0};S.plan=kv.plan||{day:-1,ids:[]};
- normalizeSavedWords();
- applyTheme();render();
+ locale=S.st.lang;document.documentElement.lang=locale;
+ normalizeSavedWords();pausedDay=readDailySession(kv.dailySession);
+ applyTheme();render();localizeUI();translateCustomWords();
  refreshCustomMetadata();
  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!(S.Q&&S.Q.active)&&S.st.onboarded)render()});
  if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
