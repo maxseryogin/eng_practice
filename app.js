@@ -378,7 +378,7 @@ const dupList=a=>a.slice(0,5).map(o=>`<div class="ar"><b>${esc(strip(o.en))}</b>
 /* Fast, bounded requests; successful lookups are reused during this session. */
 async function tfetch(u,timeout=3000){const c=new AbortController(),t=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw Error('Lookup failed');return await r.json()}finally{clearTimeout(t)}}
 const translationCache=new Map(),dictionaryCache=new Map();
-const cleanTranslation=s=>String(s||'').replace(/["“”„«»]/g,'').replace(/^['‘’]+|['‘’]+$/g,'').replace(/\s+/g,' ').trim();
+const cleanTranslation=s=>String(s||'').replace(/["“”„«»]/g,'').replace(/\s+/g,' ').trim().replace(/^['‘’]+|['‘’]+$/g,'').trim().replace(/[.,]+$/g,'').trimEnd();
 function tr(q,from,to){
  const key=from+'|'+to+'|'+q;if(translationCache.has(key))return translationCache.get(key);
  const valid=r=>{r.main=cleanTranslation(r.main);r.list=[...new Set(r.list.map(cleanTranslation).filter(x=>x&&x.toLowerCase()!==q.toLowerCase()&&(!['uk','ru'].includes(to)||CYR.test(x))))];if(!r.list.length)throw Error('No translation');return r};
@@ -616,7 +616,7 @@ async function init(){
  for(const entry of ruData['записи'])russianWords.set(entry['идентификатор'],entry);
  const kv={};(await DB.all('kv')).forEach(r=>kv[r.k]=r.v);
  S.custom=kv.custom||[];S.items=data.items;S.topics=[];
- S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null;it.uk=cleanTranslation(it.uk)});
+ S.custom.forEach(it=>{if(it.metaVersion!==2){Object.assign(it,autoWordMeta(it.en,it.uk));it.metaVersion=1}it.example=null;it.uk=cleanTranslation(it.uk);if(it.ru)it.ru=cleanTranslation(it.ru)});
  saveKV('custom',S.custom);S.items=[...S.custom,...data.items];
  S.items.forEach(indexItem);
  (await DB.all('prog')).forEach(p=>S.prog.set(p.id,p));(await DB.all('log')).forEach(l=>S.logs.set(l.d,l));
