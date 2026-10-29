@@ -94,7 +94,7 @@ function saveDailySession(){
  const Q=S.Q;if(!Q?.active||Q.mode!=='day'||!Q.cur)return;
  const q={...Q,tm:undefined,qs:undefined};
  if(q.cur.bad instanceof Set)q.cur={...q.cur,bad:[...q.cur.bad]};
- const saved={day:today(),lang:S.st.lang,q,html:$('#qb')?.innerHTML||'',input:$('#ti')?.value||''};
+ const saved={day:today(),lang:S.st.lang,exerciseVersion:2,q,html:$('#qb')?.innerHTML||'',input:$('#ti')?.value||''};
  pausedDay=JSON.parse(JSON.stringify(saved));
  try{localStorage.setItem(SESSION_KEY,JSON.stringify(pausedDay))}catch(e){}
  saveKV('dailySession',pausedDay);
@@ -105,7 +105,7 @@ function resumeDailySession(){
  if(Q.cur?.bad)Q.cur.bad=new Set(Q.cur.bad);
  if(Q.ex)Q.ex.it=S.byId.get(Q.ex.it.id);
  render();shell();
- if(saved.lang===S.st.lang){$('#qb').innerHTML=saved.html;if($('#ti'))$('#ti').value=saved.input;updPb();if(Q.locked&&!$('#fb .btn'))Q.tm=setTimeout(nextQ,300)}
+ if(saved.lang===S.st.lang&&(saved.exerciseVersion===2||Q.locked)){if(Q.ex&&Q.cur?.id)Q.ex.it=S.byId.get(Q.cur.id);$('#qb').innerHTML=saved.html;if($('#ti'))$('#ti').value=saved.input;updPb();if(Q.locked&&!$('#fb .btn'))Q.tm=setTimeout(nextQ,300)}
  else{if(Q.locked)nextQ();else{Q.queue.unshift(Q.cur);nextQ()}}
  localizeUI();return true;
 }
@@ -169,11 +169,24 @@ function grade(e,g){const Q=S.Q,t=today(),ok=g>0,p=P(e.id)||newP(e.id),L=logOf(t
  saveP(p);saveL(L);if(mode!=='prac'&&mode!=='mat'&&checkStreak())Q.streakUp=true}
 
 /* ---------- генерация упражнений ---------- */
+// Explanations can contain English examples or false friends; show them only after the answer.
+function exerciseTranslation(it,hidden=it){
+ let text=strip(wordTranslation(it)).replace(/\([^)]*[a-z][^)]*\)/gi,' ');
+ const answers=variants(hidden).flatMap(v=>v.match(/[a-z]+(?:[-'][a-z]+)*/gi)||[]).filter(w=>w.length>1);
+ for(const word of answers){const escaped=word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');text=text.replace(new RegExp('(^|[^a-z])'+escaped+'(?=$|[^a-z])','gi'),'$1___')}
+ return text.replace(/\s+/g,' ').replace(/\s+([,;.!?])/g,'$1').trim();
+}
+function meaningTokens(text){
+ const stop=new Set(['дуже','який','яка','яке','щось','щось','когось','якогось','дуже','очень','который','кого','чего','щоб','чтобы']);
+ return (text.toLowerCase().match(/[а-яіїєґё]{4,}/g)||[]).filter(w=>!stop.has(w)).map(w=>w.length>=5?w.slice(0,5):w);
+}
+function overlapsMeaning(a,b){const words=new Set(meaningTokens(a));return meaningTokens(b).some(w=>words.has(w))}
+function mentionedEnglish(it){return new Set((wordTranslation(it).toLowerCase().match(/[a-z]+(?:[-'][a-z]+)*/g)||[]).filter(w=>w.length>2))}
 function distract(it,field,n=3){
- const key=fam(it),tp=new Set(it.topics||[]),mine=String(field==='uk'?wordTranslation(it):it[field]||'');const seen=new Set([norm(mine)]);
- const sc=S.items.filter(o=>o.id!==it.id&&fam(o)===key&&!arrow(o)&&o[field]).map(o=>{const c=(o.topics||[]).filter(x=>tp.has(x)).length;
-  return[o,c*3+(o.level&&o.level===it.level?2:0)+(o.pos&&o.pos===it.pos?1:0)-Math.abs(String(o[field]).length-mine.length)/25+Math.random()*2]}).sort((a,b)=>b[1]-a[1]);
- const out=[];for(const[o]of sc){const v=strip(field==='uk'?wordTranslation(o):o[field]),k=norm(v);if(seen.has(k))continue;seen.add(k);out.push(v);if(out.length>=n)break}return out}
+ const key=fam(it),tp=new Set(it.topics||[]),mine=String(field==='uk'?exerciseTranslation(it):it[field]||''),meaning=exerciseTranslation(it),mentioned=mentionedEnglish(it),seen=new Set([norm(mine)]);
+ const sc=S.items.filter(o=>o.id!==it.id&&fam(o)===key&&!arrow(o)&&o[field]&&!(it.group&&o.group&&norm(it.group)===norm(o.group))&&!overlapsMeaning(meaning,exerciseTranslation(o))&&!(field==='en'&&(o.en.toLowerCase().match(/[a-z]+(?:[-'][a-z]+)*/g)||[]).some(w=>mentioned.has(w)))).map(o=>{const c=(o.topics||[]).filter(x=>tp.has(x)).length;
+  return[o,c*5+(o.level&&o.level===it.level?2:0)+(o.pos&&o.pos===it.pos?3:0)-Math.abs(String(o[field]).length-mine.length)/25+Math.random()]}).sort((a,b)=>b[1]-a[1]);
+ const out=[];for(const[o]of sc){const v=strip(field==='uk'?exerciseTranslation(o,it):o[field]),k=norm(v);if(!k||seen.has(k))continue;seen.add(k);out.push(v);if(out.length>=n)break}return out}
 function variants(it){const raw=arrow(it)?it.en.split('→')[1]:it.en,en=strip(raw),v=new Set([en,en.replace(/\s*\([^)]*\)/g,''),en.replace(/[()]/g,'')]);
  if(en.includes('/'))en.split('/').forEach(x=>v.add(x.trim()));[...v].forEach(x=>{if(x.startsWith('to '))v.add(x.slice(3))});return[...v].map(norm).filter(Boolean)}
 const typable=it=>it.en.length<=30&&!/…|\.\.\./.test(it.en);
@@ -183,20 +196,21 @@ function cloze(it){const w=strip(it.en).split(' ');if(w.length<2||/[()\/…]/.te
  return null}
 function buildEx(e){
  const it=S.byId.get(e.id),p=P(e.id),st=p?p.stage:0,easy=e.k==='q0'||e.r,W={},cz=cloze(it);
+ if(!exerciseTranslation(it))return{kind:'card',it};
  if(arrow(it)){W.wf=5;if(!easy)W.card=1}
  else{W.mc=st<=1||easy?4:2;W.mc2=easy?1:st>=2?3:2;if(typable(it)&&!easy&&st>=2)W.type=st>=4?4:2;if(cz)W.cloze=3;
   if(it.type==='antonym_pair'&&it.antonym)W.anto=3;if(it.type==='formal_informal'&&it.informal)W.formal=3;if(!easy)W.card=1}
  let bag=[];for(const k in W)for(let i=0;i<W[k];i++)bag.push(k);let kind=e.k==='q0'?(arrow(it)?'wf':'mc'):e.k==='q1'?(arrow(it)?'wf':typable(it)?'type':'mc2'):pick(bag);
  const mc=(label,prompt,ans,ds,sub)=>{if(ds.length<2)return{kind:'card',it};const opts=shuf([ans,...ds]);return{kind:'mc',it,label,prompt,sub,opts,ci:opts.indexOf(ans)}};
  switch(kind){
-  case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:[translatedExtra(it,'rule'),wordTranslation(it)].filter(Boolean).join(' · '),ans:variants(it)};
-  case'type':return{kind:'type',it,label:'Напиши англійською',prompt:wordTranslation(it),ans:variants(it)};
-  case'mc2':return mc('Обери англійський варіант',wordTranslation(it),strip(it.en),distract(it,'en'));
-  case'cloze':return mc('Заповни пропуск',cz.stem,cz.b,cz.d,wordTranslation(it));
+  case'wf':return{kind:'type',it,label:'Утвори слово',prompt:strip(it.en.split('→')[0])+' → ___',hint:exerciseTranslation(it),ans:variants(it)};
+  case'type':return{kind:'type',it,label:'Напиши англійською',prompt:exerciseTranslation(it),ans:variants(it)};
+  case'mc2':return mc('Обери англійський варіант',exerciseTranslation(it),strip(it.en),distract(it,'en'));
+  case'cloze':return mc('Заповни пропуск',cz.stem,cz.b,cz.d,exerciseTranslation(it));
   case'anto':return mc('Обери антонім',strip(it.en),strip(it.antonym),distract(it,'antonym'),it.uk);
-  case'formal':return mc('Обери неформальний варіант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+wordTranslation(it));
+  case'formal':return mc('Обери неформальний варіант',strip(it.en),strip(it.informal),distract(it,'informal'),'formal: '+exerciseTranslation(it));
   case'card':return{kind:'card',it};
-  default:return mc('Обери переклад',strip(it.en),wordTranslation(it),distract(it,'uk'))}}
+  default:return mc('Обери переклад',strip(it.en),exerciseTranslation(it),distract(it,'uk'))}}
 
 /* ---------- сессия ---------- */
 function startSession(mode,o={}){
@@ -213,7 +227,7 @@ function startSession(mode,o={}){
   else{const pool=S.items.filter(i=>(!o.cat||i.category===o.cat)&&(!o.topic||(i.topics||[]).includes(o.topic))&&(!o.lvl||i.level===o.lvl)),seen=pool.filter(i=>P(i.id)?.first);ids=shuf(seen.length>=8?seen:pool).slice(0,20).map(i=>i.id)}
   q=ids.map(id=>({id,k:'prac'}));if(!q.length)return toast('Поки нічого тренувати')}
  const cand=q.filter(e=>(e.k==='rev'||e.k==='prac')).map(e=>e.id).filter(id=>{const it=S.byId.get(id);return!arrow(it)&&it.en.length<=28&&it.uk.length<=42});
- for(let i=7;i<q.length&&cand.length>=4&&mode!=='day'&&mode!=='custom';i+=8)q.splice(i,0,{k:'match',ids:shuf(cand).slice(0,4)});
+ for(let i=7;i<q.length&&cand.length>=4&&mode!=='day'&&mode!=='custom';i+=8){const ids=[];for(const id of shuf(cand)){const it=S.byId.get(id),translation=exerciseTranslation(it);if(!translation||ids.some(other=>overlapsMeaning(translation,exerciseTranslation(S.byId.get(other)))))continue;ids.push(id);if(ids.length===4)break}if(ids.length===4)q.splice(i,0,{k:'match',ids})}
  S.Q={active:true,mode,practice,queue:q,total:q.filter(e=>e.k!=='match'&&e.k!=='new').length,done:0,ok:0,bad:0,nw:0,rv:0,streakUp:false};
  render();shell();nextQ()}
 function shell(){$('#app').innerHTML=`<div class="view in"><div class="sh"><button class="x" data-a="quit" aria-label="Закрити">✕</button><div class="bar pb"><i></i></div><small id="pc"></small></div><div id="qb"></div></div>`;$('#app').scrollTop=0}
@@ -267,7 +281,7 @@ function exV(x){const it=x.it;
  if(x.kind==='type')return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.hint?`<p class="sub">${esc(x.hint)}</p>`:''}</div><input id="ti" type="text" placeholder="Введи відповідь" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"><div class="two"><button class="btn" data-a="idk">Не знаю</button><button class="btn pri" data-a="chk">Перевірити</button></div>${hintControls(it)}<div id="fb"></div>`;
  return`<div class="lab">${x.label}</div><div class="glass qcard"><h2 class="pr">${esc(x.prompt)}</h2>${x.sub?`<p class="sub">${esc(x.sub)}</p>`:''}</div><div class="opts">${x.opts.map((o,i)=>`<button class="opt" data-a="opt" data-i="${i}"><b>${'ABCD'[i]}</b><span>${esc(o)}</span></button>`).join('')}</div>${hintControls(it)}<div id="fb"></div>`}
 function matchV(e){const its=e.ids.map(id=>S.byId.get(id));e.bad=new Set();e.left=null;e.n=0;
- return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(wordTranslation(i))}</span></button>`).join('')}</div></div><div id="fb"></div>`}
+ return`<div class="lab">З’єднай пари</div><div class="mt"><div class="opts">${its.map(i=>`<button class="opt" data-a="ml" data-id="${i.id}"><span>${esc(strip(i.en))}</span></button>`).join('')}</div><div class="opts">${shuf(its).map(i=>`<button class="opt" data-a="mr" data-id="${i.id}"><span>${esc(exerciseTranslation(i))}</span></button>`).join('')}</div></div><div id="fb"></div>`}
 function resolve(ok,g){const Q=S.Q;if(Q.locked)return;Q.locked=true;const e=Q.cur,it=S.byId.get(e.id);
  logOf(today()).secs+=Math.min(60,(Date.now()-Q.qs)/1e3);grade(e,g);hap();if(S.st.sound)say(it);updPb();
  $('#fb').innerHTML=`<div class="fb ${ok?'ok':'bad'}"><div class="ft">${ok?'Вірно':'Запам’ятай'}</div><div class="fa">${esc(strip(it.en))} — ${esc(wordTranslation(it))}</div>${Q.ex?.comparison||''}${e.hinted?'<p class="hint">Відповідь із підказкою</p>':''}${!it.custom&&it.example?`<div class="fe">${esc(it.example)}</div>`:''}<button class="btn pri" data-a="next">Далі</button></div>`;
